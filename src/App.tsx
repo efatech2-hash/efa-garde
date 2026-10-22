@@ -31,6 +31,8 @@ import { Logo } from './components/Logo';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
 import { WelcomeModal } from './components/WelcomeModal';
+import { LegalOnboardingModal } from './components/LegalOnboardingModal';
+import { hasUserConsentSync, checkUserConsent } from './services/consentService';
 import { supabase } from './lib/supabase';
 import {
   LogOut,
@@ -68,6 +70,22 @@ export default function App() {
       localStorage.getItem('role') == null
     );
   });
+
+  // Legal Onboarding Modal (Premier Lancement bloquant avant d'accéder à la carte)
+  const [showLegalConsent, setShowLegalConsent] = useState<boolean>(
+    () => !hasUserConsentSync()
+  );
+
+  // Vérification de secours asynchrone (check localStorage + Supabase user_consents)
+  useEffect(() => {
+    if (!hasUserConsentSync()) {
+      checkUserConsent().then((consented) => {
+        if (consented) {
+          setShowLegalConsent(false);
+        }
+      });
+    }
+  }, []);
 
   // Current Route State
   const [currentPath, setCurrentPath] = useState<string>(() => {
@@ -294,6 +312,26 @@ export default function App() {
     localStorage.removeItem('pharma_id');
     setShowWelcomeModal(true);
     navigateTo('/');
+  };
+
+  // 0. LEGAL CONSENT ACCEPTED (Premier Lancement)
+  const handleLegalConsentAccepted = () => {
+    setShowLegalConsent(false);
+    const storedRole =
+      localStorage.getItem('efa_garde_role') || localStorage.getItem('role');
+    if (!storedRole) {
+      localStorage.setItem('role', 'client');
+      localStorage.setItem('efa_garde_role', 'client');
+      const guestSession = {
+        role: 'client' as const,
+        phone: 'Client Lomé',
+        createdAt: new Date().toISOString(),
+      };
+      setSession(guestSession);
+      setLocalSession(guestSession);
+      setShowWelcomeModal(false);
+      navigateTo('/client');
+    }
   };
 
   // 1. WELCOME MODAL ACTIONS
@@ -845,9 +883,15 @@ export default function App() {
         onNavigate={navigateTo}
       />
 
-      {/* 1. WELCOME MODAL PREMIER LANCEMENT */}
+      {/* 1. LEGAL ONBOARDING PREMIER LANCEMENT (Écran bloquant avant d'accéder à la carte) */}
+      <LegalOnboardingModal
+        isOpen={showLegalConsent}
+        onConsentAccepted={handleLegalConsentAccepted}
+      />
+
+      {/* 2. WELCOME MODAL CHOIX RÔLE (Si consent déjà donné et rôle non défini) */}
       <WelcomeModal
-        isOpen={showWelcomeModal}
+        isOpen={showWelcomeModal && !showLegalConsent}
         onSelectClient={handleWelcomeSelectClient}
         onSelectPharma={handleWelcomeSelectPharma}
       />
