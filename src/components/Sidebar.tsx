@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, MapPin, MessageSquare, Megaphone, LogOut } from 'lucide-react';
+import { LayoutDashboard, MapPin, MessageSquare, Megaphone, LogOut, BarChart3 } from 'lucide-react';
 import { Logo } from './Logo';
 
 interface SidebarProps {
@@ -30,6 +30,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               currentPath === '/pharma/dashboard' ||
               currentPath === '/dashboard-pharma' ||
               currentPath === '/pharma/login',
+          },
+          {
+            id: 'stats',
+            label: 'Stats',
+            icon: BarChart3,
+            path: '/pharma/stats',
+            isActive:
+              currentPath === '/pharma/stats' ||
+              currentPath === '/stats' ||
+              currentPath === '/statistiques',
           },
         ]
       : []),

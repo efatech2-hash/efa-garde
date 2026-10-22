@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Pharmacie } from '../types';
 import { PharmacyMap } from '../components/PharmacyMap';
 import { PharmacyCard } from '../components/PharmacyCard';
-import { trackItineraryClick } from '../services/store';
+import { trackItineraryClick, recordClientContact } from '../services/store';
 import {
   get3ClosestPharmacies,
   getDistance,
@@ -366,7 +366,10 @@ export const Map: React.FC<MapProps> = ({
                   <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
                     <a
                       href={`tel:${p.tel}`}
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        recordClientContact(p.id);
+                      }}
                       className="min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-xs border border-slate-700 transition-colors"
                       title="Appeler l'officine"
                     >
@@ -392,12 +395,15 @@ export const Map: React.FC<MapProps> = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (p.is_online) onOpenChat(p.id);
+                        if (p.is_online) {
+                          recordClientContact(p.id);
+                          onOpenChat(p.id);
+                        }
                       }}
                       disabled={!p.is_online || p.is_pending}
                       className={`min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl font-bold text-xs transition-all ${
                         p.is_online && !p.is_pending
-                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30'
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30 cursor-pointer'
                           : 'bg-slate-800/60 text-slate-500 border border-slate-800 cursor-not-allowed opacity-60'
                       }`}
                       title={p.is_pending ? 'En attente de vérification' : p.is_online ? 'Discuter en direct' : 'Pharmacie hors ligne'}

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pharmacie } from '../types';
 import { getGoogleMapsNavigationUrl, formatDistanceUser } from '../utils/geo';
-import { trackItineraryClick } from '../services/store';
+import { trackItineraryClick, recordClientContact } from '../services/store';
 import { Phone, Navigation, MessageSquare, Star, CheckCircle2, XCircle, MapPin } from 'lucide-react';
 
 interface PharmacyCardProps {
@@ -126,6 +126,7 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
         {/* Appeler */}
         <a
           href={`tel:${pharmacy.tel}`}
+          onClick={() => recordClientContact(pharmacy.id)}
           className="min-h-[48px] flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 hover:text-emerald-200 border border-slate-700 font-bold text-sm transition-all shadow active:scale-95"
         >
           <Phone className="w-4 h-4 text-emerald-400" />
@@ -149,7 +150,10 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
         {/* Chat Live (actif si is_online, disabled sinon) */}
         {isOnline ? (
           <button
-            onClick={() => onOpenChat(pharmacy.id)}
+            onClick={() => {
+              recordClientContact(pharmacy.id);
+              onOpenChat(pharmacy.id);
+            }}
             className="min-h-[48px] flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/30 active:scale-95 cursor-pointer"
           >
             <MessageSquare className="w-4 h-4" />

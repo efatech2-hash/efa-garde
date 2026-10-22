@@ -26,6 +26,7 @@ import { PaiementInscriptionPage } from './pages/PaiementInscriptionPage';
 import { AdminPharmaciesPage } from './pages/AdminPharmaciesPage';
 import { hasValidRegistrationPaymentToken } from './lib/paymentTokens';
 import { Splash } from './pages/Splash';
+import { PharmaStatsPage } from './pages/PharmaStatsPage';
 import { Logo } from './components/Logo';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
@@ -41,6 +42,7 @@ import {
   MessageCircle,
   X,
   ChevronRight,
+  BarChart3,
 } from 'lucide-react';
 
 export default function App() {
@@ -456,9 +458,10 @@ export default function App() {
     if (isPharmaUser) {
       content = (
         <DashboardPharma
-          onNavigate={(tab) =>
-            navigateTo(tab === 'dashboard' ? '/pharma/dashboard' : `/${tab}`)
-          }
+          onNavigate={(tab) => {
+            const clean = tab.startsWith('/') ? tab : `/${tab}`;
+            navigateTo(clean === '/dashboard' ? '/pharma/dashboard' : clean);
+          }}
           onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
         />
       );
@@ -495,9 +498,10 @@ export default function App() {
   ) {
     content = (
       <DashboardPharma
-        onNavigate={(tab) =>
-          navigateTo(tab === 'dashboard' ? '/pharma/dashboard' : `/${tab}`)
-        }
+        onNavigate={(tab) => {
+          const clean = tab.startsWith('/') ? tab : `/${tab}`;
+          navigateTo(clean === '/dashboard' ? '/pharma/dashboard' : clean);
+        }}
         onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
       />
     );
@@ -530,6 +534,19 @@ export default function App() {
         activePharmaId={activePharmaId}
         onSelectActivePharma={handleSelectActivePharma}
         onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
+      />
+    );
+  } else if (
+    currentPath === '/pharma/stats' ||
+    currentPath === '/stats' ||
+    currentPath === '/statistiques'
+  ) {
+    content = (
+      <PharmaStatsPage
+        pharmacies={pharmacies}
+        activePharmaId={activePharmaId}
+        onSelectActivePharma={handleSelectActivePharma}
+        onNavigate={navigateTo}
       />
     );
   } else if (currentPath === '/qr') {
@@ -623,6 +640,22 @@ export default function App() {
                 >
                   <span className="text-sm">👁️</span>
                   <span className="hidden md:inline">Vue client</span>
+                </button>
+              )}
+
+              {/* BOUTON STATISTIQUES PHARMA */}
+              {isPharmaUser && (
+                <button
+                  onClick={() => navigateTo('/pharma/stats')}
+                  className={`flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 ${
+                    currentPath === '/pharma/stats' || currentPath === '/stats'
+                      ? 'bg-[#0A3D8F] text-white border-blue-400'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+                  }`}
+                  title="Consulter les statistiques de fréquentation"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="hidden sm:inline">Stats</span>
                 </button>
               )}
 

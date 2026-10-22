@@ -7,7 +7,9 @@ import {
   deleteGarde,
   updatePharmacyStatus,
   isPharmacyCurrentlyOnDuty,
-  loadConversations
+  loadConversations,
+  getPharmacyStats,
+  PharmacyStatsSummary,
 } from '../services/store';
 import { getSession } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -30,7 +32,10 @@ import {
   MessageSquare,
   CreditCard,
   Building2,
-  Sparkles
+  Sparkles,
+  BarChart3,
+  TrendingUp,
+  Users,
 } from 'lucide-react';
 
 interface DashboardPharmaProps {
@@ -53,6 +58,9 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
   const [gardes, setGardes] = useState<Garde[]>([]);
   const [autoSync, setAutoSync] = useState(true);
   const [conversationsCount, setConversationsCount] = useState(0);
+  const [stats, setStats] = useState<PharmacyStatsSummary>(() =>
+    getPharmacyStats(currentPharma?.id || 'pharma-1')
+  );
 
   // Paiement 15.000 FCFA caller
   const [isCallingPayment15000, setIsCallingPayment15000] = useState(false);
@@ -125,6 +133,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
     setGardes(gList);
     const cList = loadConversations(currentPharma.id);
     setConversationsCount(cList.length);
+    setStats(getPharmacyStats(currentPharma.id));
   };
 
   useEffect(() => {
@@ -280,8 +289,17 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
             </div>
           </div>
 
-          {/* Quick Status Pill */}
-          <div className="flex items-center gap-2 self-start md:self-auto">
+          {/* Quick Actions & Status */}
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+            <button
+              onClick={() => onNavigate('pharma/stats')}
+              className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-[#0A3D8F]/25 hover:bg-[#0A3D8F]/40 text-blue-300 hover:text-white border border-blue-500/40 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+              title="Consulter les statistiques clients & affluence"
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-blue-400" />
+              <span>STATISTIQUES</span>
+            </button>
+
             <span
               className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 border ${
                 currentPharma.is_online
@@ -641,6 +659,112 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
               </div>
             )}
           </div>
+        </div>
+
+        {/* 5. CARTE RÉSUMÉ STATISTIQUES EN BAS DU DASHBOARD */}
+        <div className="bg-white text-slate-900 border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#0A3D8F] flex items-center justify-center border border-blue-100 shrink-0">
+                <BarChart3 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900">
+                  Statistiques & Affluence de votre Officine
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Fréquentation en temps réel et contacts patients à Lomé
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => onNavigate('pharma/stats')}
+              className="px-3.5 py-1.5 rounded-xl bg-[#0A3D8F] hover:bg-blue-900 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
+            >
+              <span>Voir détails & graphiques</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* 3 Métriques clés */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Cette semaine
+              </span>
+              <div className="text-3xl font-black text-[#0A3D8F] my-1">
+                {stats.totalThisWeek}
+              </div>
+              <span className="text-xs text-slate-600 font-medium">
+                Clients ayant contacté
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Ce mois
+              </span>
+              <div className="text-3xl font-black text-[#0A3D8F] my-1">
+                {stats.totalThisMonth}
+              </div>
+              <span className="text-xs text-slate-600 font-medium">
+                Total clients 30 jours
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Conversations
+              </span>
+              <div className="text-3xl font-black text-[#0A3D8F] my-1">
+                {stats.conversationsHandled}
+              </div>
+              <span className="text-xs text-slate-600 font-medium">
+                Prises en charge
+              </span>
+            </div>
+          </div>
+
+          {/* Mini preview barres 7 jours */}
+          <div className="pt-2">
+            <div className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
+              <span>Activité des 7 derniers jours :</span>
+              <span className="text-[11px] text-slate-500 font-normal">Chiffres en bleu EFA</span>
+            </div>
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center">
+              {stats.dailyStats7Days.map((d, idx) => {
+                const maxVal = Math.max(...stats.dailyStats7Days.map((item) => item.count), 1);
+                const pct = Math.max(Math.round((d.count / maxVal) * 100), 12);
+                return (
+                  <div key={idx} className="flex flex-col items-center gap-1">
+                    <div className="w-full h-16 sm:h-20 bg-slate-100 rounded-xl flex items-end p-1 justify-center">
+                      <div
+                        style={{ height: `${pct}%` }}
+                        className="w-full bg-[#0A3D8F] hover:bg-blue-600 rounded-lg transition-all"
+                        title={`${d.label}: ${d.count} clients`}
+                      />
+                    </div>
+                    <span className="text-[10px] font-extrabold text-[#0A3D8F]">
+                      {d.count}
+                    </span>
+                    <span className="text-[9px] text-slate-500 truncate w-full">
+                      {d.label.replace("Aujourd'hui", 'Auj.')}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigate('pharma/stats')}
+            className="w-full py-3 rounded-2xl bg-[#0A3D8F] hover:bg-blue-900 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+          >
+            <BarChart3 className="w-4 h-4" />
+            <span>Ouvrir l'onglet STATISTIQUES complet (Graphiques 7j & 30j)</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Modal: Programmer une Garde */}

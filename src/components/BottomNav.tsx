@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, MessageSquare, Megaphone, LayoutDashboard } from 'lucide-react';
+import { MapPin, MessageSquare, Megaphone, LayoutDashboard, BarChart3 } from 'lucide-react';
 
 interface BottomNavProps {
   role: 'client' | 'pharma' | 'pharma_active' | 'pharma_pending';
@@ -20,7 +20,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   const isPharma =
     role === 'pharma' || role === 'pharma_active' || role === 'pharma_pending';
 
-  // Tabs mobile ultra-fines (h-14 max) : CARTE, CHAT, ESPACE PUBLICITAIRE
+  // Tabs mobile ultra-fines (h-14 max) : CARTE, CHAT, ESPACE PUBLICITAIRE (+ Dashboard, Stats si pharmacien)
   const tabs = [
     ...(isPharma
       ? [
@@ -33,6 +33,16 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               currentPath === '/pharma/dashboard' ||
               currentPath === '/dashboard-pharma' ||
               currentPath === '/pharma/login',
+          },
+          {
+            id: 'stats',
+            label: 'Stats',
+            icon: BarChart3,
+            path: '/pharma/stats',
+            isActive:
+              currentPath === '/pharma/stats' ||
+              currentPath === '/stats' ||
+              currentPath === '/statistiques',
           },
         ]
       : []),

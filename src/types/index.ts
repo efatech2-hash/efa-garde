@@ -85,3 +85,10 @@ export interface PresenceState {
   pharmacieId?: string;
   onlineAt: string;
 }
+
+export interface PharmacyDailyStat {
+  pharmacie_id: string;
+  date: string; // YYYY-MM-DD
+  client_count: number;
+}
+
