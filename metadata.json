@@ -1,0 +1,12 @@
+{
+  "name": "Remix EFA GARDE - Pharmacies de Garde Lomé",
+  "description": "Application temps réel de pharmacies de garde à Lomé : carte interactive, 3 plus proches, statut en direct, chat instantané, calendrier de gardes et abonnements.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
