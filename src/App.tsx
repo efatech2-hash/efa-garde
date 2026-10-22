@@ -626,7 +626,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex font-sans antialiased">
+    <div
+      className={`min-h-screen bg-slate-950 text-slate-100 flex font-sans antialiased ${
+        currentPath === '/inbox' ? 'h-screen max-h-screen overflow-hidden' : ''
+      }`}
+    >
       {/* Desktop Sidebar (Role Filtered) */}
       <Sidebar
         role={userRole}
@@ -636,7 +640,11 @@ export default function App() {
       />
 
       {/* Main App Container */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div
+        className={`flex-1 flex flex-col min-w-0 ${
+          currentPath === '/inbox' ? 'h-full max-h-full overflow-hidden' : ''
+        }`}
+      >
         {/* Top Header: Logo petit à gauche + EFA GARDE */}
         <header className="sticky top-0 z-[800] bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-md w-full overflow-x-hidden">
           <div className="w-full max-w-7xl mx-auto px-2.5 sm:px-6 h-16 flex items-center justify-between gap-2 overflow-x-hidden">
@@ -669,18 +677,6 @@ export default function App() {
 
             {/* Right Tools */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              {/* BOUTON SWITCH EN HAUT ANGLE PHARMA : icone 👁️ "Voir comme client" */}
-              {isPharmaUser && (
-                <button
-                  onClick={() => navigateTo('/client')}
-                  className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 hover:text-white border border-blue-500/40 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-                  title="Voir l'application comme un patient (sans effacer votre rôle pharmacie)"
-                >
-                  <span className="text-sm">👁️</span>
-                  <span className="hidden md:inline">Vue client</span>
-                </button>
-              )}
-
               {/* BOUTON STATISTIQUES PHARMA */}
               {isPharmaUser && (
                 <button
@@ -873,7 +869,15 @@ export default function App() {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 w-full overflow-x-hidden">{content}</main>
+        <main
+          className={`flex-1 w-full ${
+            currentPath === '/inbox'
+              ? 'h-[calc(100vh-4rem)] flex flex-col min-h-0 overflow-hidden pb-14 md:pb-0'
+              : 'overflow-x-hidden'
+          }`}
+        >
+          {content}
+        </main>
       </div>
 
       {/* MOBILE BOTTOM NAVIGATION */}

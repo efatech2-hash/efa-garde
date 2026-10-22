@@ -242,10 +242,12 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     };
   }, [currentPharma?.id, selectedConv, soundEnabled]);
 
-  // Scroll to bottom
+  // Auto-scroll: Quand nouveau message arrive, scroll auto en bas avec ref.scrollIntoView({behavior: 'smooth'})
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, selectedConv]);
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages.length, selectedConv?.id]);
 
   const handleSendReply = (quickMsg?: string) => {
     const text = (quickMsg !== undefined ? quickMsg : inputText).trim();
@@ -253,6 +255,9 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
 
     addMessage(selectedConv.id, 'pharma', text, { type: 'text' });
     setInputText('');
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
   };
 
   // Photo handlers
@@ -381,31 +386,31 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   const visibleMessages = messages.filter((m) => !isMessageExpired(m));
 
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2 sm:py-4 h-[calc(100vh-9.5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col gap-3">
+    <div className="w-full h-full max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col min-h-0 overflow-hidden gap-2 sm:gap-3">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg shrink-0">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-3 sm:p-4 rounded-2xl shadow-lg shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold shrink-0">
             <InboxIcon className="w-5 h-5" />
           </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-black text-white">
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-black text-white truncate">
               Messagerie de garde pharmacien - {currentPharma.nom}
             </h1>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-400 truncate">
               Discussions directes avec les patients de Lomé • Alertes sonores • Auto-clean 48h
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
           {/* Sound Toggle */}
           <button
             onClick={() => {
               playNotificationSound();
               setSoundEnabled(!soundEnabled);
             }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
               soundEnabled
                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                 : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -418,15 +423,15 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
         </div>
       </div>
 
-      {/* Main Inbox Container */}
-      <div className="flex-1 min-h-0 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-12">
+      {/* Main Inbox Container (Flex layout 100% height) */}
+      <div className="flex-1 min-h-0 h-full w-full bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row">
         {/* Conversations List */}
         <div
           className={`${
             selectedConv ? 'hidden md:flex' : 'flex'
-          } md:col-span-4 border-r border-slate-800 flex-col bg-slate-900/50`}
+          } w-full md:w-80 lg:w-96 border-r border-slate-800 flex-col bg-slate-900/60 min-h-0 h-full shrink-0 overflow-hidden`}
         >
-          <div className="p-3 border-b border-slate-800 bg-slate-800/40 flex items-center justify-between">
+          <div className="p-3 border-b border-slate-800 bg-slate-800/40 flex items-center justify-between shrink-0">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
               Conversations ({conversations.length})
             </span>
@@ -436,7 +441,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
             {conversations.length === 0 ? (
               <div className="p-8 text-center text-slate-500 text-xs">
                 Aucun message reçu pour le moment.
@@ -462,15 +467,15 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-1 mb-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">
                           <User className="w-3.5 h-3.5" />
                         </div>
                         <span className="text-xs font-bold text-white truncate max-w-[140px]">
                           Patient {c.client_id.replace('client-', '#')}
                         </span>
                       </div>
-                      <span className="text-[10px] text-slate-400">{formattedTime}</span>
+                      <span className="text-[10px] text-slate-400 shrink-0">{formattedTime}</span>
                     </div>
 
                     <p className="text-xs text-slate-300 truncate pl-9">
@@ -487,49 +492,54 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
         <div
           className={`${
             !selectedConv ? 'hidden md:flex' : 'flex'
-          } md:col-span-8 flex-col bg-[#efeae2] text-[#111b21]`}
+          } flex-1 flex-col bg-[#efeae2] text-[#111b21] min-h-0 h-full overflow-hidden`}
         >
           {selectedConv ? (
-            <>
+            <div className="w-full h-full flex flex-col min-h-0 overflow-hidden">
               {/* Thread Header */}
-              <div className="p-3 border-b border-gray-300 bg-[#0A3D8F] text-white flex items-center justify-between gap-2 shadow-sm">
-                <div className="flex items-center gap-2.5">
+              <div className="p-3 border-b border-gray-300 bg-[#0A3D8F] text-white flex items-center justify-between gap-2 shadow-sm shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
                   <button
                     onClick={() => setSelectedConv(null)}
-                    className="md:hidden p-1.5 rounded-full hover:bg-black/10 text-white font-bold"
+                    className="md:hidden p-1.5 rounded-full hover:bg-white/10 text-white font-bold cursor-pointer"
                     title="Retour aux conversations"
                   >
                     ←
                   </button>
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <div className="w-9 h-9 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-sm">
                       <User className="w-5 h-5" />
                     </div>
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0A3D8F] animate-pulse" />
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">
-                      Messagerie de garde pharmacien - {currentPharma.nom}
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold text-white truncate">
+                      Patient {selectedConv.client_id.replace('client-', '#')}
                     </h3>
-                    <p className="text-[11px] text-blue-200">
-                      Patient {selectedConv.client_id.replace('client-', '#')} • 48h auto-clean
+                    <p className="text-[11px] text-blue-200 truncate">
+                      Messagerie de garde • {currentPharma.nom}
                     </p>
                   </div>
                 </div>
 
-                <div className="text-xs text-white/90 truncate font-semibold">
+                <div className="text-xs text-white/90 truncate font-semibold shrink-0">
                   {currentPharma.nom}
                 </div>
               </div>
 
-              {/* Messages Content (Style WhatsApp) */}
+              {/* Messages Content (Style WhatsApp) - Scrollable avec height calc et flex column */}
               <div
-                className="flex-1 overflow-y-auto p-4 space-y-2.5"
                 style={{
+                  height: 'calc(100vh - 230px)',
+                  overflowY: 'auto',
+                  flex: '1 1 0%',
+                  display: 'flex',
+                  flexDirection: 'column',
                   backgroundImage:
                     'radial-gradient(circle at 50% 50%, rgba(0,0,0,0.03) 1px, transparent 1px)',
                   backgroundSize: '20px 20px',
                 }}
+                className="w-full flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-2.5 !overflow-y-auto"
               >
                 {visibleMessages.length === 0 ? (
                   <div className="text-center py-12 text-gray-500 text-xs">
@@ -597,11 +607,11 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                     );
                   })
                 )}
-                <div ref={messagesEndRef} />
+                <div ref={messagesEndRef} className="h-2 shrink-0" />
               </div>
 
               {/* Quick Reply Presets */}
-              <div className="px-3 py-1.5 bg-[#f0f2f5] border-t border-gray-300 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              <div className="px-3 py-1.5 bg-[#f0f2f5] border-t border-gray-300 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
                 {pharmaChips.map((chip, idx) => (
                   <button
                     key={idx}
@@ -712,7 +722,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                   </form>
                 )}
               </div>
-            </>
+            </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-gray-500">
               <MessageSquare className="w-12 h-12 text-gray-400 mb-3" />
