@@ -9,9 +9,7 @@ import {
   MapPin,
   Clock,
   MessageSquare,
-  Sparkles,
   ArrowRight,
-  Check,
 } from 'lucide-react';
 
 interface LegalOnboardingModalProps {
@@ -34,7 +32,6 @@ export const LegalOnboardingModal: React.FC<LegalOnboardingModalProps> = ({
     const checked = e.target.checked;
     setIsChecked(checked);
     if (checked) {
-      // Pré-déclenchement en arrière-plan pour enregistrer dès que l'utilisateur coche
       saveUserConsent().catch((err) =>
         console.warn('Consent save background notice:', err)
       );
@@ -161,6 +158,11 @@ export const LegalOnboardingModal: React.FC<LegalOnboardingModalProps> = ({
               </label>
             </div>
 
+            {/* Mention légale 18 ans */}
+            <div className="text-[11px] text-slate-500 text-center italic">
+              En cochant la case, vous déclarez avoir 18 ans ou plus et accepter ces deux documents.
+            </div>
+
             {/* Bouton CONTINUER : Grisé tant que case non cochée, BLEU EFA #0A3D8F dès que cochée */}
             <button
               type="button"
@@ -185,185 +187,225 @@ export const LegalOnboardingModal: React.FC<LegalOnboardingModalProps> = ({
         </div>
       </div>
 
-      {/* MODAL 1 SÉPARÉ : Conditions d'utilisation */}
-      {showTermsModal && (
+      {/* A) MODAL : "Politique de confidentialité - EFA GARDE" */}
+      {showPrivacyModal && (
         <div className="fixed inset-0 z-[1400] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] flex flex-col border border-slate-200 text-slate-800 animate-in zoom-in-95 duration-150">
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-200 shrink-0">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] flex flex-col border border-slate-200 text-slate-800 overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Header bleu EFA #0A3D8F */}
+            <div className="bg-[#0A3D8F] text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#0A3D8F] flex items-center justify-center">
-                  <FileText className="w-4 h-4" />
+                <div className="w-8 h-8 rounded-xl bg-white/15 flex items-center justify-center text-white">
+                  <Lock className="w-4 h-4" />
                 </div>
-                <h2 className="text-base font-black text-slate-900">
-                  Conditions d'utilisation
+                <h2 className="text-base sm:text-lg font-black tracking-tight text-white">
+                  Politique de confidentialité - EFA GARDE
                 </h2>
               </div>
               <button
-                onClick={() => setShowTermsModal(false)}
-                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                onClick={() => setShowPrivacyModal(false)}
+                className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-colors cursor-pointer"
                 title="Fermer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Scrollable Content */}
-            <div className="p-5 overflow-y-auto space-y-4 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-2xl text-[11px] text-[#0A3D8F] font-semibold">
-                Version 1.0 • En vigueur pour l'agglomération de Lomé (Togo)
+            {/* Scrollable Content avec EXACTEMENT le texte demandé */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs sm:text-sm text-slate-700 leading-relaxed bg-white">
+              <div className="font-semibold text-slate-500 pb-2 border-b border-slate-100">
+                Dernière mise à jour : Novembre 2026 - EFA TECHNOLOGIE - Lomé, Togo
               </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  1. Objet et Présentation du Service
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  1. Qui sommes-nous ?
                 </h3>
                 <p>
-                  L'application <strong>EFA GARDE</strong> a pour vocation de faciliter l'accès aux soins d'urgence en permettant aux citoyens de repérer en temps réel les pharmacies de garde ouvertes à Lomé et dans ses environs, ainsi que de communiquer directement avec les équipes officinales.
+                  EFA GARDE est édité par EFA TECHNOLOGIE, RCCM : [ton RCCM], Lomé. Contact : efatech2@gmail.com / +228 96100972. Nous ne sommes pas une pharmacie. Nous sommes un annuaire.
                 </p>
-              </section>
+              </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  2. Accès Gratuit aux Patients
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  2. Quelles données on collecte ?
                 </h3>
-                <p>
-                  L'accès à la carte des pharmacies de garde, la recherche de proximité, la consultation des horaires et l'utilisation de la messagerie instantanée sont entièrement <strong>gratuits</strong> pour l'ensemble des usagers. Aucun paiement ni abonnement n'est exigé des patients.
-                </p>
-              </section>
-
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  3. Absence de Téléconsultation Médicale Directe
-                </h3>
-                <p>
-                  La messagerie d'EFA GARDE permet de vérifier la disponibilité d'un médicament ou de transmettre une ordonnance pour préparation. Elle ne remplace en aucun cas une consultation médicale ni un diagnostic délivré par un médecin habilité.
-                </p>
-              </section>
-
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  4. Urgences Vitales
-                </h3>
-                <p>
-                  En cas d'urgence vitale ou d'accident grave, contactez immédiatement les services officiels togolais :
-                </p>
-                <ul className="list-disc pl-5 space-y-0.5 text-xs text-slate-700">
-                  <li><strong>SAMU Lomé :</strong> 22 25 15 15</li>
-                  <li><strong>Pompiers (Accidents & Secours) :</strong> 118</li>
-                  <li><strong>Police Secours :</strong> 170</li>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>
+                    <strong>Pour les clients :</strong> Nom (facultatif), numéro de téléphone (si vous utilisez le chat), position GPS (uniquement pour vous montrer les pharmacies proches), photos d'ordonnances (si vous les envoyez au pharmacien).
+                  </li>
+                  <li>
+                    <strong>Pour les pharmaciens :</strong> Nom, nom de pharmacie, adresse, téléphone, jours de garde.
+                  </li>
+                  <li>
+                    <strong>Automatique :</strong> Modèle de téléphone, logs de connexion.
+                  </li>
                 </ul>
-              </section>
+              </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  5. Propriété Intellectuelle
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  3. Pourquoi on collecte ?
                 </h3>
                 <p>
-                  Les marques, logos, graphismes et codes sources d'EFA GARDE sont la propriété exclusive d'EFA Tech. Toute reproduction non autorisée est strictement interdite.
+                  Uniquement pour : afficher les pharmacies de garde sur la carte, permettre l'itinéraire et le contact, et pour que le pharmacien réponde à votre chat. Nous ne vendons JAMAIS de médicaments.
                 </p>
-              </section>
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  4. Photos d'ordonnances
+                </h3>
+                <p>
+                  Si vous envoyez une photo d'ordonnance par chat, elle est transmise directement et uniquement au pharmacien choisi. Elle est supprimée automatiquement de nos serveurs après 7 jours. Ne jamais envoyer votre carte d'identité.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  5. Où sont stockées les données ?
+                </h3>
+                <p>
+                  Hébergement sécurisé (Europe/Afrique). Données conservées 2 ans maximum après votre dernière utilisation.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  6. Vos droits (Loi Togolaise 2019-014)
+                </h3>
+                <p>
+                  Vous avez droit d'accès, de rectification, de suppression. Pour exercer : écrivez-nous à efatech2@gmail.com avec votre numéro. Nous répondons sous 72h. Vous pouvez aussi saisir l'ATOP Togo.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  7. Partage
+                </h3>
+                <p>
+                  Nous ne vendons jamais vos données. Seul le pharmacien que VOUS contactez reçoit votre message. Les données des pharmacies (adresse, tel) sont publiques.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  8. Cookies
+                </h3>
+                <p>
+                  On utilise juste ce qu'il faut pour que la carte marche.
+                </p>
+              </div>
             </div>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-slate-200 shrink-0">
+            {/* Footer avec bouton FERMER */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end shrink-0">
               <button
-                onClick={() => setShowTermsModal(false)}
-                className="w-full py-3 rounded-xl bg-[#0A3D8F] hover:bg-blue-900 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                type="button"
+                onClick={() => setShowPrivacyModal(false)}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#0A3D8F] hover:bg-blue-900 text-white font-bold text-xs shadow-md transition-all cursor-pointer active:scale-95"
               >
-                J'ai compris et je ferme
+                FERMER
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 2 SÉPARÉ : Politique de confidentialité */}
-      {showPrivacyModal && (
+      {/* B) MODAL : "Conditions d'utilisation - EFA GARDE" */}
+      {showTermsModal && (
         <div className="fixed inset-0 z-[1400] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] flex flex-col border border-slate-200 text-slate-800 animate-in zoom-in-95 duration-150">
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-200 shrink-0">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] flex flex-col border border-slate-200 text-slate-800 overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Header bleu EFA #0A3D8F */}
+            <div className="bg-[#0A3D8F] text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
-                  <Lock className="w-4 h-4" />
+                <div className="w-8 h-8 rounded-xl bg-white/15 flex items-center justify-center text-white">
+                  <FileText className="w-4 h-4" />
                 </div>
-                <h2 className="text-base font-black text-slate-900">
-                  Politique de confidentialité
+                <h2 className="text-base sm:text-lg font-black tracking-tight text-white">
+                  Conditions d'utilisation - EFA GARDE
                 </h2>
               </div>
               <button
-                onClick={() => setShowPrivacyModal(false)}
-                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                onClick={() => setShowTermsModal(false)}
+                className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-colors cursor-pointer"
                 title="Fermer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Scrollable Content */}
-            <div className="p-5 overflow-y-auto space-y-4 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              <div className="p-3 bg-emerald-50/70 border border-emerald-100 rounded-2xl text-[11px] text-emerald-800 font-semibold">
-                Engagement de protection des données personnelles & de santé • Version 1.0
+            {/* Scrollable Content avec EXACTEMENT le texte demandé */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs sm:text-sm text-slate-700 leading-relaxed bg-white">
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  1. Objet du service
+                </h3>
+                <p>
+                  EFA GARDE est un service d'information gratuit pour le public. Il affiche les pharmacies de garde et permet de les contacter. EFA GARDE ne vend, ne prescrit, ne conseille aucun médicament. La dispensation reste exclusivement au comptoir sous contrôle du pharmacien titulaire.
+                </p>
               </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  1. Minimisation des Données Collectées
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  2. Engagement de l'utilisateur
                 </h3>
                 <p>
-                  EFA GARDE applique le principe de minimisation absolue. Nous ne collectons que les informations strictement nécessaires au fonctionnement du service :
+                  Vous vous engagez à ne pas utiliser le chat pour : injures, fausses alertes, demande de stupéfiants. Toute photo d'ordonnance envoyée doit être la vôtre. En cas d'abus, votre accès sera bloqué.
                 </p>
-                <ul className="list-disc pl-5 space-y-0.5 text-xs text-slate-700">
-                  <li><strong>Localisation GPS :</strong> Utilisée uniquement avec votre autorisation pour calculer la distance vers les officines les plus proches. Votre position n'est jamais stockée de manière permanente.</li>
-                  <li><strong>Identifiant de consentement :</strong> Horodatage, version et adresse IP (pour prouver la conformité légale de votre consentement).</li>
-                </ul>
-              </section>
+              </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  2. Règle Stricte d'Éphémérité 48H des Messages
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  3. Engagement d'EFA GARDE
                 </h3>
                 <p>
-                  Tous les échanges de messagerie (textes, photos d'ordonnances, notes vocales) sont soumis à un <strong>nettoyage automatique permanent après 48 heures</strong>. Aucun historique médical n'est conservé au-delà de cette durée légale de garde.
+                  Nous faisons de notre mieux pour que les infos de garde soient exactes, mais elles sont renseignées par les pharmaciens eux-mêmes. En cas d'erreur, EFA GARDE ne peut être tenu responsable. Toujours appeler avant de vous déplacer la nuit.
                 </p>
-              </section>
+              </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  3. Pas de Revente de Données
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  4. Urgence
                 </h3>
                 <p>
-                  EFA GARDE s'engage formellement à <strong>ne jamais vendre, louer ni céder</strong> vos données personnelles ou de santé à des tiers, régies publicitaires ou courtiers de données.
+                  EFA GARDE n'est pas un service d'urgence. En cas d'urgence vitale, appelez le SAMU, le 118 ou allez directement à l'hôpital le plus proche.
                 </p>
-              </section>
+              </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  4. Sécurité & Chiffrement
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  5. Abonnement pharmaciens
                 </h3>
                 <p>
-                  Toutes les communications entre votre appareil et nos serveurs sont protégées par le protocole sécurisé <strong>HTTPS / TLS 1.3</strong>.
+                  L'abonnement (25000F pour enregistrer sur l'application, 15.000F/mois ou 140000F/ans Et 90.000F/mois) est mensuel, sans engagement, facturé avec facture certifiée OTR. Résiliable à tout moment depuis le tableau de bord. Nous pouvons apporter des modifications à nos tarifs à tout moment.
                 </p>
-              </section>
+                <p>
+                  Notre page de publicité, n'est destinée qu'à passer les annonces sur des services et produits légaux de divers acteurs économiques selon la législation togolaise.
+                </p>
+              </div>
 
-              <section className="space-y-1.5">
-                <h3 className="font-extrabold text-slate-900 text-sm">
-                  5. Exercice de Vos Droits
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm">
+                  6. Modification
                 </h3>
                 <p>
-                  Vous disposez d'un droit permanent d'accès, de rectification et de suppression totale de vos données. Vous pouvez nous contacter directement sur WhatsApp au <strong>+228 96 10 09 72</strong> ou par e-mail.
+                  Nous pouvons modifier ces règles. La nouvelle version sera affichée dans l'app. Si vous continuez à utiliser l'app, vous acceptez.
                 </p>
-              </section>
+              </div>
+
+              <div className="pt-2 p-3 bg-blue-50 border border-blue-100 rounded-2xl text-[11px] text-[#0A3D8F] font-semibold text-center">
+                En cochant la case, vous déclarez avoir 18 ans ou plus et accepter ces deux documents.
+              </div>
             </div>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-slate-200 shrink-0">
+            {/* Footer avec bouton FERMER */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end shrink-0">
               <button
-                onClick={() => setShowPrivacyModal(false)}
-                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                type="button"
+                onClick={() => setShowTermsModal(false)}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#0A3D8F] hover:bg-blue-900 text-white font-bold text-xs shadow-md transition-all cursor-pointer active:scale-95"
               >
-                J'ai compris et je ferme
+                FERMER
               </button>
             </div>
           </div>
