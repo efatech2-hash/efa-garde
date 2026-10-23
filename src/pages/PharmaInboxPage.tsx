@@ -393,11 +393,17 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
           <div className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold shrink-0">
             <InboxIcon className="w-5 h-5" />
           </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-sm sm:text-base md:text-lg font-black text-white line-clamp-2 md:truncate break-words">
-              Messagerie de garde pharmacie - {currentPharma.nom}
-            </h1>
-            <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+          <div className="flex flex-col min-w-0 max-w-[60vw] sm:max-w-none flex-1 overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1.5 min-w-0 flex-wrap text-sm md:text-base">
+              <span className="font-black text-white truncate max-w-[60vw] sm:max-w-none leading-tight">
+                Messagerie de garde pharmacie
+              </span>
+              <span className="hidden sm:inline text-white/50">•</span>
+              <span className="font-extrabold text-emerald-400 truncate max-w-[60vw] sm:max-w-none leading-tight">
+                {currentPharma.nom}
+              </span>
+            </div>
+            <p className="text-[11px] sm:text-xs text-slate-400 truncate max-w-[60vw] sm:max-w-none">
               Discussions directes avec les patients de Lomé • Alertes sonores • Auto-clean 48h
             </p>
           </div>
@@ -512,13 +518,19 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                     </div>
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0A3D8F] animate-pulse" />
                   </div>
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-white truncate">
+                  <div className="flex flex-col min-w-0 max-w-[60vw] sm:max-w-none justify-center overflow-hidden">
+                    <h3 className="text-sm font-bold text-white truncate max-w-[60vw] sm:max-w-none">
                       Patient {selectedConv.client_id.replace('client-', '#')}
                     </h3>
-                    <p className="text-[11px] text-blue-200 truncate">
-                      Messagerie de garde • {currentPharma.nom}
-                    </p>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1 min-w-0 flex-wrap text-xs">
+                      <span className="text-[11px] text-blue-100 font-medium truncate max-w-[60vw] sm:max-w-none">
+                        Messagerie de garde pharmacie
+                      </span>
+                      <span className="hidden sm:inline text-blue-200/60">•</span>
+                      <span className="text-[11px] font-bold text-white truncate max-w-[60vw] sm:max-w-none">
+                        {currentPharma.nom}
+                      </span>
+                    </div>
                   </div>
                 </div>
 

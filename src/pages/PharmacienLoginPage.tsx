@@ -55,8 +55,16 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
 
     setLoading(true);
 
-    // 7. COMPTE SUPER ADMIN PASSE-PARTOUT
-    if (cleanEmail === 'efatech2@gmail.com' && cleanPassword === '2hcetafe') {
+    const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || '').trim();
+    const superAdminPassword = (process.env.SUPER_ADMIN_PASSWORD || '').trim();
+
+    // 7. COMPTE SUPER ADMIN PASSE-PARTOUT VIA PROCESS.ENV
+    if (
+      superAdminEmail &&
+      superAdminPassword &&
+      cleanEmail.toLowerCase() === superAdminEmail.toLowerCase() &&
+      cleanPassword === superAdminPassword
+    ) {
       const activeId = localStorage.getItem('efa_active_pharma_id') || pharmacies[0]?.id || 'pharma-1';
       const targetPharma = pharmacies.find((p) => p.id === activeId) || pharmacies[0];
 
@@ -70,7 +78,7 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
         role: 'pharma_active',
         pharmaId: targetPharma?.id || 'pharma-1',
         pharmacieNom: targetPharma?.nom || 'Pharmacie EFA',
-        email: 'efatech2@gmail.com',
+        email: cleanEmail,
         createdAt: new Date().toISOString(),
       });
 
@@ -378,7 +386,7 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
             <span>➕ Enregistrer ma pharmacie</span>
           </button>
           <div className="text-center text-[11px] text-slate-500 font-medium">
-            Filtre Anti-Fake • Enregistrement 25.000 FCFA par T-Money / Moov Money
+            Vérification officielle • Enregistrement 25.000 FCFA par T-Money / Moov Money
           </div>
         </div>
       </div>

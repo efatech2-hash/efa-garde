@@ -609,11 +609,17 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
             />
           </div>
 
-          {/* Titre responsive : "Messagerie de garde pharmacie - [Nom Pharmacie]" */}
-          <div className="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-1">
-            <h1 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight line-clamp-2 md:line-clamp-1 break-words">
-              Messagerie de garde pharmacie - {pharmacy.nom}
-            </h1>
+          {/* Titre responsive : "Messagerie de garde pharmacie [Nom Pharmacie]" */}
+          <div className="flex flex-col min-w-0 max-w-[60vw] sm:max-w-none flex-1 justify-center overflow-hidden pr-1">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1.5 min-w-0 flex-wrap text-sm md:text-base">
+              <span className="font-bold text-white truncate max-w-[60vw] sm:max-w-none leading-tight">
+                Messagerie de garde pharmacie
+              </span>
+              <span className="hidden sm:inline text-white/60">•</span>
+              <span className="font-extrabold text-white truncate max-w-[60vw] sm:max-w-none leading-tight">
+                {pharmacy.nom}
+              </span>
+            </div>
             <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[11px] text-white/90">
               {pharmaOnline ? (
                 <span className="text-emerald-300 font-semibold flex items-center gap-1 shrink-0">
@@ -624,7 +630,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
                 <span className="text-white/70 shrink-0">pharmacien de garde</span>
               )}
               <span className="text-white/40">•</span>
-              <span className="truncate max-w-[100px] sm:max-w-[160px] text-white/80">
+              <span className="truncate max-w-[80px] sm:max-w-[160px] text-white/80">
                 {pharmacy.quartier || 'Lomé'}
               </span>
             </div>

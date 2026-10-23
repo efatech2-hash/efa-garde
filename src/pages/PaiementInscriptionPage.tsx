@@ -71,7 +71,7 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
             <span>Retour connexion</span>
           </button>
           <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
-            Filtre Anti-Fake
+            Vérification
           </span>
         </div>
 
@@ -103,7 +103,7 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
                 Paiement de 25.000 FCFA Confirmé !
               </h3>
               <p className="text-xs text-slate-300">
-                Token de paiement anti-fake validé. Redirection vers le formulaire officiel...
+                Token de paiement validé. Redirection vers le formulaire officiel...
               </p>
             </div>
             <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 font-semibold pt-2">

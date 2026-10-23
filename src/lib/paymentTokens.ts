@@ -1,5 +1,5 @@
 /**
- * Gestionnaire de Token de Paiement Anti-Fake pour l'Enregistrement Officine Lomé
+ * Gestionnaire de Token de Paiement pour l'Enregistrement Officine Lomé
  * Montant officiel : 25.000 FCFA (T-Money / Moov Money)
  */
 

@@ -225,7 +225,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
 
             <div className="p-5 rounded-2xl bg-slate-800/40 border border-slate-800 text-xs text-slate-300 space-y-2 text-left leading-relaxed">
               <p className="font-bold text-white text-sm">
-                Filtre Anti-Fake Obligatoire
+                Vérification Obligatoire
               </p>
               <p>
                 Pour garantir la sécurité des patients de Lomé et lutter contre les fausses officines, l'enregistrement nécessite le règlement préalable de <strong>25.000 FCFA</strong> via T-Money ou Moov Money.
@@ -577,7 +577,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-start gap-2">
               <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <span>
-                <strong>Contrôle anti-fake :</strong> Votre compte sera vérifié par l'Ordre sous 24h avant activation de votre accès au tableau de bord.
+                <strong>Contrôle de vérification :</strong> Votre compte sera vérifié par l'Ordre sous 24h avant activation de votre accès au tableau de bord.
               </span>
             </div>
 

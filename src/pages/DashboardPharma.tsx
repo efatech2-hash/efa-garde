@@ -36,6 +36,7 @@ import {
   BarChart3,
   TrendingUp,
   Users,
+  X,
 } from 'lucide-react';
 
 interface DashboardPharmaProps {
@@ -50,10 +51,13 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
   const session = getSession();
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
 
+  const superAdminEnvEmail = (process.env.SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
   const isSuperAdmin =
-    session?.email === 'efatech2@gmail.com' ||
+    (session?.email && (session.email.toLowerCase() === 'efatech2@gmail.com' || (superAdminEnvEmail && session.email.toLowerCase() === superAdminEnvEmail))) ||
     localStorage.getItem('is_super_admin') === 'true' ||
     localStorage.getItem('role') === 'admin';
+
+  const [showDebugDrawer, setShowDebugDrawer] = useState(false);
 
   const [activeDebugId, setActiveDebugId] = useState<string>(
     () => localStorage.getItem('efa_active_pharma_id') || session?.pharmaId || pharmacies[0]?.id || 'pharma-1'
@@ -273,7 +277,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
 
         {/* BARRE SUPER ADMIN PASSE-PARTOUT (DEBUG & SWITCH OFFICINE) */}
         {isSuperAdmin && (
-          <div className="w-full bg-amber-500/10 border-2 border-amber-500/40 rounded-3xl p-4 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 animate-in fade-in">
+          <div className="w-full bg-amber-500/10 border-2 border-amber-500/40 rounded-3xl p-3 sm:p-4 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm shrink-0">
                 👑
@@ -282,7 +286,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                 <div className="text-xs font-black uppercase text-amber-300 tracking-wider flex items-center gap-2">
                   <span>SUPER ADMIN PASSE-PARTOUT</span>
                   <span className="text-[10px] font-mono text-amber-200/80 bg-amber-500/20 px-2 py-0.5 rounded-full">
-                    efatech2@gmail.com
+                    {session?.email || 'efatech2@gmail.com'}
                   </span>
                 </div>
                 <div className="text-[11px] text-amber-200/70">
@@ -291,21 +295,18 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 w-full md:w-auto">
-              <label className="text-xs font-bold text-slate-300 shrink-0">
-                Officine debug :
-              </label>
-              <select
-                value={currentPharma.id}
-                onChange={(e) => handleSuperAdminSwitchPharma(e.target.value)}
-                className="bg-slate-900 border border-amber-500/50 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400 cursor-pointer flex-1 md:w-64"
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setShowDebugDrawer(true)}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-slate-950 font-black text-xs flex items-center justify-between sm:justify-center gap-2 transition-all cursor-pointer shadow-md active:scale-95"
               >
-                {pharmacies.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nom} ({p.id})
-                  </option>
-                ))}
-              </select>
+                <span className="flex items-center gap-1.5">
+                  <span>Officine debug :</span>
+                  <span className="font-extrabold underline max-w-[150px] truncate">{currentPharma.nom}</span>
+                </span>
+                <span className="text-[10px] bg-slate-950/20 px-1.5 py-0.5 rounded">Changer ▼</span>
+              </button>
             </div>
           </div>
         )}
@@ -880,6 +881,114 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* BOUTON FLOTTANT FIXÉ BOTTOM-RIGHT POUR ACCÈS AU POUCE SMARTPHONE */}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setShowDebugDrawer(true)}
+            className="fixed bottom-6 right-4 sm:bottom-8 sm:right-6 z-40 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs sm:text-sm px-4 py-3.5 rounded-2xl shadow-2xl shadow-amber-500/50 border-2 border-amber-300 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+            title="Officine debug - Switcher au pouce"
+          >
+            <span className="text-base">👑</span>
+            <span className="font-bold">Officine debug</span>
+            <span className="max-w-[100px] truncate text-[11px] font-semibold bg-slate-950/20 px-2 py-0.5 rounded-full">
+              {currentPharma.nom}
+            </span>
+          </button>
+        )}
+
+        {/* BOTTOM SHEET DRAWER RESPONSIVE SMARTPHONE (MAX-H 70VH, OVERFLOW-Y AUTO) */}
+        {isSuperAdmin && showDebugDrawer && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div
+              onClick={() => setShowDebugDrawer(false)}
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs transition-opacity cursor-pointer"
+            />
+            <div className="relative w-full sm:max-w-xl max-h-[70vh] bg-slate-900 border-t-2 sm:border-2 border-amber-500/60 rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-5 flex flex-col z-10 overflow-hidden">
+              {/* Thumb bar */}
+              <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-3 shrink-0 sm:hidden" />
+
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-base shrink-0">
+                    👑
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm sm:text-base font-black text-white">
+                        Officine debug
+                      </h3>
+                      <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
+                        {pharmacies.length} disponibles
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Sélectionnez une officine au pouce pour basculer
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDebugDrawer(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Fermer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Liste avec overflow-y-auto et max-h-[70vh] */}
+              <div className="flex-1 min-h-0 overflow-y-auto py-3 space-y-2 pr-1">
+                {pharmacies.map((p) => {
+                  const isSelected = p.id === currentPharma.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        handleSuperAdminSwitchPharma(p.id);
+                        setShowDebugDrawer(false);
+                      }}
+                      className={`w-full text-left p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 cursor-pointer active:scale-98 ${
+                        isSelected
+                          ? 'bg-amber-500/15 border-amber-500 text-white shadow-lg shadow-amber-500/10 ring-1 ring-amber-500'
+                          : 'bg-slate-800/50 border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-sm truncate">{p.nom}</span>
+                          {isSelected && (
+                            <span className="text-[10px] font-mono bg-amber-500 text-slate-950 font-black px-1.5 py-0.5 rounded-md shrink-0">
+                              ACTIF
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-400 mt-1 truncate">
+                          <span className="font-mono text-emerald-400 text-[11px] font-bold">{p.id}</span>
+                          <span>•</span>
+                          <span className="truncate">{p.quartier || p.adresse}</span>
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        {isSelected ? (
+                          <div className="w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-sm shadow-sm">
+                            ✓
+                          </div>
+                        ) : (
+                          <div className="w-7 h-7 rounded-full border border-slate-700 text-slate-400 flex items-center justify-center text-xs">
+                            →
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
