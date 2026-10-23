@@ -393,11 +393,11 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
           <div className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold shrink-0">
             <InboxIcon className="w-5 h-5" />
           </div>
-          <div className="min-w-0">
-            <h1 className="text-base sm:text-lg font-black text-white truncate">
-              Messagerie de garde pharmacien - {currentPharma.nom}
+          <div className="min-w-0 flex-1">
+            <h1 className="text-sm sm:text-base md:text-lg font-black text-white line-clamp-2 md:truncate break-words">
+              Messagerie de garde pharmacie - {currentPharma.nom}
             </h1>
-            <p className="text-xs text-slate-400 truncate">
+            <p className="text-[11px] sm:text-xs text-slate-400 truncate">
               Discussions directes avec les patients de Lomé • Alertes sonores • Auto-clean 48h
             </p>
           </div>

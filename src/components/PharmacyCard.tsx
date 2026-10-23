@@ -133,18 +133,41 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
           <span>Appeler</span>
         </a>
 
-        {/* Bouton "Ma position" : ouvre Google Maps itinéraire */}
+        {/* Bouton "Itinéraire" : ouvre Google Maps itinéraire Client -> Pharmacie */}
         <button
           type="button"
           onClick={() => {
             trackItineraryClick(pharmacy.id);
-            window.open(`https://www.google.com/maps/dir/?api=1&destination=${pharmacy.lat},${pharmacy.lng}`);
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  const latClient = pos.coords.latitude;
+                  const lngClient = pos.coords.longitude;
+                  window.open(
+                    `https://www.google.com/maps/dir/?api=1&origin=${latClient},${lngClient}&destination=${pharmacy.lat},${pharmacy.lng}&travelmode=driving`,
+                    '_blank'
+                  );
+                },
+                () => {
+                  window.open(
+                    `https://www.google.com/maps/dir/?api=1&destination=${pharmacy.lat},${pharmacy.lng}&travelmode=driving`,
+                    '_blank'
+                  );
+                },
+                { enableHighAccuracy: true, timeout: 8000 }
+              );
+            } else {
+              window.open(
+                `https://www.google.com/maps/dir/?api=1&destination=${pharmacy.lat},${pharmacy.lng}&travelmode=driving`,
+                '_blank'
+              );
+            }
           }}
           className="min-h-[48px] flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 font-bold text-sm transition-all shadow active:scale-95 text-center cursor-pointer"
           title="Ouvrir l'itinéraire Google Maps vers cette officine"
         >
           <Navigation className="w-4 h-4 text-blue-400" />
-          <span>Ma position</span>
+          <span>Itinéraire</span>
         </button>
 
         {/* Chat Live (actif si is_online, disabled sinon) */}

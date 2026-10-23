@@ -50,10 +50,24 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
   const session = getSession();
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
 
-  // FIX 1: Auto Sync Pharmacie - SELECT * FROM pharmacies WHERE user_id = auth.user.id LIMIT 1
-  // Uses session pharmaId with zero dropdown / zero choice
-  const targetId = session?.pharmaId || localStorage.getItem('efa_active_pharma_id') || pharmacies[0]?.id;
+  const isSuperAdmin =
+    session?.email === 'efatech2@gmail.com' ||
+    localStorage.getItem('is_super_admin') === 'true' ||
+    localStorage.getItem('role') === 'admin';
+
+  const [activeDebugId, setActiveDebugId] = useState<string>(
+    () => localStorage.getItem('efa_active_pharma_id') || session?.pharmaId || pharmacies[0]?.id || 'pharma-1'
+  );
+
+  const targetId = isSuperAdmin ? activeDebugId : (session?.pharmaId || localStorage.getItem('efa_active_pharma_id') || pharmacies[0]?.id);
   const currentPharma = pharmacies.find((p) => p.id === targetId) || pharmacies[0];
+
+  const handleSuperAdminSwitchPharma = (newId: string) => {
+    setActiveDebugId(newId);
+    localStorage.setItem('efa_active_pharma_id', newId);
+    localStorage.setItem('pharma_id', newId);
+    setStats(getPharmacyStats(newId));
+  };
 
   const [gardes, setGardes] = useState<Garde[]>([]);
   const [autoSync, setAutoSync] = useState(true);
@@ -254,6 +268,45 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
             >
               Fermer
             </button>
+          </div>
+        )}
+
+        {/* BARRE SUPER ADMIN PASSE-PARTOUT (DEBUG & SWITCH OFFICINE) */}
+        {isSuperAdmin && (
+          <div className="w-full bg-amber-500/10 border-2 border-amber-500/40 rounded-3xl p-4 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm shrink-0">
+                👑
+              </div>
+              <div>
+                <div className="text-xs font-black uppercase text-amber-300 tracking-wider flex items-center gap-2">
+                  <span>SUPER ADMIN PASSE-PARTOUT</span>
+                  <span className="text-[10px] font-mono text-amber-200/80 bg-amber-500/20 px-2 py-0.5 rounded-full">
+                    efatech2@gmail.com
+                  </span>
+                </div>
+                <div className="text-[11px] text-amber-200/70">
+                  Mode debug actif : sélectionnez ou chargez n'importe quelle officine par ID
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <label className="text-xs font-bold text-slate-300 shrink-0">
+                Officine debug :
+              </label>
+              <select
+                value={currentPharma.id}
+                onChange={(e) => handleSuperAdminSwitchPharma(e.target.value)}
+                className="bg-slate-900 border border-amber-500/50 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400 cursor-pointer flex-1 md:w-64"
+              >
+                {pharmacies.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nom} ({p.id})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
 

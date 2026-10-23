@@ -32,22 +32,6 @@ interface PharmacienRegisterPageProps {
   onBackToMap: () => void;
 }
 
-const QUARTIERS_LOME = [
-  'Dékon',
-  'Tokoin',
-  'Adidogomé',
-  'Agoè-Nyivé',
-  'Bè-Kpota',
-  'Hedzranawoé',
-  'Kodjoviakopé',
-  'Nyékonakpoè',
-  'Baguida',
-  'Aflao Gakli',
-  'Kégué',
-  'Agoè Assiyéyé',
-  'Autre...',
-];
-
 export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
   onSuccess,
   onNavigateToLogin,
@@ -66,10 +50,11 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
   const [numeroOrdre, setNumeroOrdre] = useState('');
   const [titulaire, setTitulaire] = useState('');
   const [phone, setPhone] = useState('');
-  const [quartier, setQuartier] = useState(QUARTIERS_LOME[0]);
+  const [quartier, setQuartier] = useState('');
   const [adresse, setAdresse] = useState('');
-  const [lat, setLat] = useState(LOME_CENTER.lat);
-  const [lng, setLng] = useState(LOME_CENTER.lng);
+  const [lat, setLat] = useState<number | string>(LOME_CENTER.lat);
+  const [lng, setLng] = useState<number | string>(LOME_CENTER.lng);
+  const [gpsToast, setGpsToast] = useState<string | null>(null);
   const [piecePreview, setPiecePreview] = useState<string | null>(null);
   const [devanturePreview, setDevanturePreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -96,19 +81,30 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
     }
   };
 
+  // 10. Bouton "📍 Ma position" : récupère coords et remplit les 2 inputs + toast
   const handleUseGps = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLat(Number(pos.coords.latitude.toFixed(5)));
-          setLng(Number(pos.coords.longitude.toFixed(5)));
-        },
-        () => {
-          alert("Impossible d'obtenir la position GPS actuelle.");
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
+    if (!navigator.geolocation) {
+      setGpsToast("Géolocalisation non supportée");
+      setTimeout(() => setGpsToast(null), 3000);
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const detectedLat = Number(pos.coords.latitude.toFixed(6));
+        const detectedLng = Number(pos.coords.longitude.toFixed(6));
+        setLat(detectedLat);
+        setLng(detectedLng);
+        setGpsToast('Position récupérée');
+        setTimeout(() => setGpsToast(null), 3000);
+      },
+      (err) => {
+        console.warn('GPS error in register form:', err);
+        setGpsToast("Impossible de récupérer la position GPS");
+        setTimeout(() => setGpsToast(null), 3000);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -134,6 +130,16 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
 
     if (motDePasse.length < 6) {
       setErrorMsg('Le mot de passe doit comporter au moins 6 caractères.');
+      return;
+    }
+
+    if (!quartier.trim()) {
+      setErrorMsg('Le champ Quartier est obligatoire.');
+      return;
+    }
+
+    if (lat === '' || lng === '' || isNaN(Number(lat)) || isNaN(Number(lng))) {
+      setErrorMsg('Les coordonnées Latitude et Longitude sont obligatoires.');
       return;
     }
 
@@ -170,7 +176,15 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 py-8 px-4 sm:px-6 flex flex-col justify-center items-center font-sans antialiased text-slate-100">
+    <div className="min-h-screen bg-slate-950 py-8 px-4 sm:px-6 flex flex-col justify-center items-center font-sans antialiased text-slate-100 relative">
+      {/* Toast Notification : "Position récupérée" */}
+      {gpsToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[2000] bg-emerald-600 text-white px-5 py-2.5 rounded-2xl shadow-2xl text-xs sm:text-sm font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border border-emerald-400/40">
+          <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+          <span>{gpsToast}</span>
+        </div>
+      )}
+
       <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-in fade-in duration-200">
         {/* Navigation retour */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -427,22 +441,20 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* 8. Quartier (saisie libre) & Adresse */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-slate-300 font-bold mb-1">
-                      Quartier à Lomé <span className="text-red-400">*</span>
+                      Quartier <span className="text-red-400">*</span>
                     </label>
-                    <select
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ex: Tokoin, Bè, Adidogomé..."
                       value={quartier}
                       onChange={(e) => setQuartier(e.target.value)}
                       className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-xl border border-slate-700 text-sm focus:border-emerald-500 focus:outline-none"
-                    >
-                      {QUARTIERS_LOME.map((q) => (
-                        <option key={q} value={q}>
-                          {q}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>
@@ -460,18 +472,55 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
                   </div>
                 </div>
 
-                {/* GPS */}
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-slate-400 text-[11px] font-mono">
-                    GPS: {lat.toFixed(4)}, {lng.toFixed(4)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleUseGps}
-                    className="text-xs font-bold text-blue-400 hover:text-blue-300 underline cursor-pointer"
-                  >
-                    📍 Prendre ma position GPS actuelle
-                  </button>
+                {/* 9 & 10. Latitude et Longitude côte à côte + Bouton "📍 Ma position" */}
+                <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                      Coordonnées GPS officielles <span className="text-red-400">*</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleUseGps}
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 text-xs font-bold transition-all cursor-pointer active:scale-95 self-start sm:self-auto"
+                      title="Remplir automatiquement Latitude et Longitude avec le GPS"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                      <span>📍 Ma position</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-300 font-bold mb-1">
+                        Latitude <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        placeholder="Ex: 6.1319"
+                        value={lat}
+                        onChange={(e) => setLat(e.target.value === '' ? '' : Number(e.target.value))}
+                        className="w-full bg-slate-800 text-white font-mono px-3 py-2.5 rounded-xl border border-slate-700 text-sm focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-bold mb-1">
+                        Longitude <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        placeholder="Ex: 1.2228"
+                        value={lng}
+                        onChange={(e) => setLng(e.target.value === '' ? '' : Number(e.target.value))}
+                        className="w-full bg-slate-800 text-white font-mono px-3 py-2.5 rounded-xl border border-slate-700 text-sm focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

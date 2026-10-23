@@ -267,19 +267,42 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
           </div>
         )}
 
-        {/* Bouton "Ma position" : ouvre Google Maps */}
+        {/* Bouton "Itinéraire" : ouvre Google Maps avec itinéraire Client -> Pharmacie */}
         <button
           onClick={() => {
             const target = selectedPharmacy || pharmacies[0];
             const targetLat = target?.lat || 6.1319;
             const targetLng = target?.lng || 1.2228;
-            window.open(`https://www.google.com/maps/dir/?api=1&destination=${targetLat},${targetLng}`);
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  const latClient = pos.coords.latitude;
+                  const lngClient = pos.coords.longitude;
+                  window.open(
+                    `https://www.google.com/maps/dir/?api=1&origin=${latClient},${lngClient}&destination=${targetLat},${targetLng}&travelmode=driving`,
+                    '_blank'
+                  );
+                },
+                () => {
+                  window.open(
+                    `https://www.google.com/maps/dir/?api=1&destination=${targetLat},${targetLng}&travelmode=driving`,
+                    '_blank'
+                  );
+                },
+                { enableHighAccuracy: true, timeout: 8000 }
+              );
+            } else {
+              window.open(
+                `https://www.google.com/maps/dir/?api=1&destination=${targetLat},${targetLng}&travelmode=driving`,
+                '_blank'
+              );
+            }
           }}
           className="px-4 py-2.5 min-h-[46px] rounded-2xl shadow-2xl font-black text-xs sm:text-sm transition-all flex items-center gap-2 cursor-pointer active:scale-95 bg-[#0A3D8F] hover:bg-[#082e6d] text-white border border-blue-400/40 shadow-blue-900/50"
           title="Ouvrir l'itinéraire Google Maps"
         >
           <span className="text-base">📍</span>
-          <span>Ma position (Google Maps)</span>
+          <span>Itinéraire</span>
         </button>
 
         {/* Bouton "Me localiser" GPS Leaflet */}

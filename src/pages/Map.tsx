@@ -68,6 +68,43 @@ export const Map: React.FC<MapProps> = ({
     }
   };
 
+  // Itinéraire Google Maps Client -> Pharmacie
+  const handleOpenItinerary = (destLat: number, destLng: number) => {
+    if (userLocation) {
+      window.open(
+        `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${destLat},${destLng}&travelmode=driving`,
+        '_blank'
+      );
+      return;
+    }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          setUserLocation({ lat, lng });
+          window.open(
+            `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${destLat},${destLng}&travelmode=driving`,
+            '_blank'
+          );
+        },
+        () => {
+          window.open(
+            `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`,
+            '_blank'
+          );
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    } else {
+      window.open(
+        `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`,
+        '_blank'
+      );
+    }
+  };
+
   // 1. GPS "Me localiser" / "Où suis-je"
   const handleLocateUser = () => {
     setLocationLoading(true);
@@ -377,19 +414,19 @@ export const Map: React.FC<MapProps> = ({
                       <span>Appeler</span>
                     </a>
 
-                    {/* 5. Bouton "Ma position" ouvre Google Maps Navigation */}
+                    {/* 5. Bouton "Itinéraire" ouvre Google Maps Navigation */}
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         trackItineraryClick(p.id);
-                        window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`);
+                        handleOpenItinerary(p.lat, p.lng);
                       }}
                       className="min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 font-bold text-xs border border-blue-500/40 transition-colors cursor-pointer"
                       title="Ouvrir l'itinéraire Google Maps"
                     >
                       <Navigation className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Ma position</span>
+                      <span>Itinéraire</span>
                     </button>
 
                     <button

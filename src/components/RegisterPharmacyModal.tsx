@@ -31,6 +31,7 @@ export const RegisterPharmacyModal: React.FC<RegisterPharmacyModalProps> = ({
   userPosition,
 }) => {
   const [nom, setNom] = useState('');
+  const [quartier, setQuartier] = useState('');
   const [adresse, setAdresse] = useState('');
   const [lat, setLat] = useState(userPosition ? userPosition.lat : LOME_CENTER.lat);
   const [lng, setLng] = useState(userPosition ? userPosition.lng : LOME_CENTER.lng);
@@ -60,7 +61,7 @@ export const RegisterPharmacyModal: React.FC<RegisterPharmacyModalProps> = ({
         setLat(detectedLat);
         setLng(detectedLng);
         setGpsLoading(false);
-        setGpsFeedback(`Position GPS détectée avec succès (${detectedLat}, ${detectedLng})`);
+        setGpsFeedback('Position récupérée');
       },
       (err) => {
         console.warn('GPS error in register form:', err);
@@ -77,6 +78,10 @@ export const RegisterPharmacyModal: React.FC<RegisterPharmacyModalProps> = ({
 
     if (!nom.trim()) {
       setErrorMsg("Veuillez renseigner le nom de l'officine.");
+      return;
+    }
+    if (!quartier.trim()) {
+      setErrorMsg("Veuillez renseigner le quartier.");
       return;
     }
     if (!adresse.trim()) {
@@ -99,7 +104,7 @@ export const RegisterPharmacyModal: React.FC<RegisterPharmacyModalProps> = ({
         tel: tel.trim(),
         is_online: garde,
         horaires: horaires.trim() || '24h/24',
-        quartier: 'Lomé',
+        quartier: quartier.trim() || 'Lomé',
         titulaire: 'Pharmacien Titulaire',
       });
 
@@ -165,25 +170,41 @@ export const RegisterPharmacyModal: React.FC<RegisterPharmacyModalProps> = ({
             </div>
           </div>
 
-          {/* 2. Adresse */}
-          <div className="space-y-1.5">
-            <label className="block text-slate-300 font-bold">
-              Adresse géographique à Lomé <span className="text-emerald-400">*</span>
-            </label>
-            <div className="relative">
-              <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
+          {/* 2. Quartier & Adresse */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="block text-slate-300 font-bold">
+                Quartier <span className="text-emerald-400">*</span>
+              </label>
               <input
                 type="text"
                 required
-                placeholder="Ex: Boulevard du 13 Janvier, Quartier Dékon, Lomé"
-                value={adresse}
-                onChange={(e) => setAdresse(e.target.value)}
-                className="w-full bg-slate-800 text-white pl-9 pr-3 py-3 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
+                placeholder="Ex: Tokoin, Bè, Adidogomé..."
+                value={quartier}
+                onChange={(e) => setQuartier(e.target.value)}
+                className="w-full bg-slate-800 text-white px-3 py-3 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-slate-300 font-bold">
+                Adresse géographique <span className="text-emerald-400">*</span>
+              </label>
+              <div className="relative">
+                <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Boulevard du 13 Janvier, Lomé"
+                  value={adresse}
+                  onChange={(e) => setAdresse(e.target.value)}
+                  className="w-full bg-slate-800 text-white pl-9 pr-3 py-3 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
+                />
+              </div>
             </div>
           </div>
 
-          {/* 3. GPS (Bouton Détecter ma position) */}
+          {/* 3. GPS (Bouton Ma position) */}
           <div className="space-y-2 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5">
             <div className="flex items-center justify-between">
               <label className="block text-slate-300 font-bold">
@@ -193,7 +214,7 @@ export const RegisterPharmacyModal: React.FC<RegisterPharmacyModalProps> = ({
                 type="button"
                 onClick={handleDetectGps}
                 disabled={gpsLoading}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-emerald-900/30"
+                className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 disabled:opacity-50 text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
               >
                 {gpsLoading ? (
                   <>
@@ -202,8 +223,8 @@ export const RegisterPharmacyModal: React.FC<RegisterPharmacyModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <Navigation className="w-3.5 h-3.5" />
-                    <span>Détecter ma position</span>
+                    <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                    <span>📍 Ma position</span>
                   </>
                 )}
               </button>

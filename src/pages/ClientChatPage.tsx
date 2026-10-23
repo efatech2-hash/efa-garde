@@ -481,6 +481,32 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     }
   };
 
+  // Bouton "Map" : ouvre Google Maps avec l'itinéraire automatique Client -> Pharmacie
+  const handleOpenGoogleMapsItinerary = () => {
+    const destLat = pharmacy.lat;
+    const destLng = pharmacy.lng;
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const latClient = pos.coords.latitude;
+          const lngClient = pos.coords.longitude;
+          const url = `https://www.google.com/maps/dir/?api=1&origin=${latClient},${lngClient}&destination=${destLat},${destLng}&travelmode=driving`;
+          window.open(url, '_blank');
+        },
+        (err) => {
+          console.warn('Geolocation error for itinerary:', err);
+          const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`;
+          window.open(fallbackUrl, '_blank');
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    } else {
+      const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`;
+      window.open(fallbackUrl, '_blank');
+    }
+  };
+
   // Envoi de la position GPS avec gestion d'autorisation
   const handleSendLocation = () => {
     if (!navigator.geolocation) {
@@ -493,8 +519,8 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
       (pos) => {
         setIsLocating(false);
         const { latitude, longitude } = pos.coords;
-        const mapsLink = `https://www.google.com/maps?q=${latitude.toFixed(5)},${longitude.toFixed(5)}`;
-        const text = `📍 Ma position GPS : ${mapsLink}`;
+        const itineraryUrl = `https://www.google.com/maps/dir/?api=1&origin=${latitude.toFixed(5)},${longitude.toFixed(5)}&destination=${pharmacy.lat},${pharmacy.lng}&travelmode=driving`;
+        const text = `📍 Ma position GPS & itinéraire : ${itineraryUrl}`;
         if (conversation) {
           addMessage(conversation.id, 'client', text, { type: 'text' });
         }
@@ -583,22 +609,22 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
             />
           </div>
 
-          {/* Titre : "Messagerie de garde pharmacien - [Nom Pharmacie]" */}
-          <div className="min-w-0 flex flex-col justify-center">
-            <h1 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight truncate max-w-[200px] sm:max-w-md">
-              Messagerie de garde pharmacien - {pharmacy.nom}
+          {/* Titre responsive : "Messagerie de garde pharmacie - [Nom Pharmacie]" */}
+          <div className="flex-1 min-w-0 flex flex-col justify-center overflow-hidden pr-1">
+            <h1 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight line-clamp-2 md:line-clamp-1 break-words">
+              Messagerie de garde pharmacie - {pharmacy.nom}
             </h1>
-            <div className="flex items-center gap-1.5 text-[11px] text-white/90">
+            <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[11px] text-white/90">
               {pharmaOnline ? (
-                <span className="text-emerald-300 font-semibold flex items-center gap-1">
+                <span className="text-emerald-300 font-semibold flex items-center gap-1 shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   en ligne
                 </span>
               ) : (
-                <span className="text-white/70">pharmacien de garde</span>
+                <span className="text-white/70 shrink-0">pharmacien de garde</span>
               )}
               <span className="text-white/40">•</span>
-              <span className="truncate max-w-[120px] sm:max-w-[180px] text-white/80">
+              <span className="truncate max-w-[100px] sm:max-w-[160px] text-white/80">
                 {pharmacy.quartier || 'Lomé'}
               </span>
             </div>
@@ -606,20 +632,30 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         </div>
 
         {/* Right Header Actions */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Bouton "Map" : itinéraire automatique Google Maps client -> pharmacie */}
+          <button
+            onClick={handleOpenGoogleMapsItinerary}
+            className="px-2.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 active:bg-white/30 text-white flex items-center gap-1 text-xs font-bold border border-white/20 transition-all cursor-pointer shadow-xs"
+            title="Itinéraire Google Maps vers la pharmacie"
+          >
+            <MapPin className="w-3.5 h-3.5 text-emerald-300" />
+            <span className="text-[11px] sm:text-xs">Map</span>
+          </button>
+
           {/* Info toggle */}
           <button
             onClick={() => setShowInfoBanner(!showInfoBanner)}
-            className="p-2 rounded-full hover:bg-white/10 text-white/90 transition-colors cursor-pointer"
+            className="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-white/90 transition-colors cursor-pointer"
             title="Détails officine"
           >
-            <Info className="w-5 h-5" />
+            <Info className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           {/* Call button [📞] */}
           <a
             href={`tel:${pharmacy.tel}`}
-            className="p-2 sm:px-3 sm:py-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center gap-1.5 text-xs font-semibold border border-white/20 transition-all cursor-pointer"
+            className="p-1.5 sm:px-3 sm:py-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center gap-1.5 text-xs font-semibold border border-white/20 transition-all cursor-pointer"
             title="Appeler l'officine"
           >
             <Phone className="w-4 h-4" />
