@@ -23,6 +23,7 @@ import {
   FileText,
   CreditCard,
   Hash,
+  MessageCircle,
 } from 'lucide-react';
 
 interface PharmacienRegisterPageProps {
@@ -43,10 +44,17 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
     () => getRegistrationPaymentToken()
   );
 
+  const [nom, setNom] = useState('');
   const [emailPro, setEmailPro] = useState('');
-  const [motDePasse, setMotDePasse] = useState('');
+
+  const rawWhatsapp = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
   const [nomPharmacie, setNomPharmacie] = useState('');
+  const [motDePasse, setMotDePasse] = useState('');
   const [ifu, setIfu] = useState('');
+
+  const whatsappUrl = `https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(
+    `Bonjour EFA TECH, je souhaite payer les 25.000F pour enregistrer ma pharmacie ${(nomPharmacie || nom).trim() || ''}. Email: ${emailPro.trim() || ''}`
+  )}`;
   const [numeroOrdre, setNumeroOrdre] = useState('');
   const [titulaire, setTitulaire] = useState('');
   const [phone, setPhone] = useState('');
@@ -236,9 +244,20 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
             </div>
 
             <div className="space-y-3 pt-2">
+              {/* GROS BOUTON FIXE "Payer 25.000F via WhatsApp" */}
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full min-h-[56px] py-4 px-6 rounded-2xl bg-[#25D366] hover:bg-[#20ba59] active:bg-[#1da850] text-slate-950 font-black text-sm sm:text-base shadow-2xl shadow-[#25D366]/40 transition-all flex items-center justify-center gap-2.5 cursor-pointer text-center active:scale-98 border-2 border-emerald-300"
+              >
+                <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 fill-slate-950 text-slate-950 shrink-0" />
+                <span>Payer 25.000F via WhatsApp</span>
+              </a>
+
               <button
                 onClick={onNavigateToPayment}
-                className="w-full min-h-[52px] py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                className="w-full min-h-[50px] py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
               >
                 <CreditCard className="w-5 h-5" />
                 <span>Payer les 25.000 FCFA par T-Money / Moov Money</span>

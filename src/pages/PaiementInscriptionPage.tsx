@@ -10,6 +10,7 @@ import {
   Lock,
   Building2,
   Sparkles,
+  MessageCircle,
 } from 'lucide-react';
 
 interface PaiementInscriptionPageProps {
@@ -23,9 +24,18 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
 }) => {
   const [operator, setOperator] = useState<'TMONEY' | 'MOOV'>('TMONEY');
   const [phoneNumber, setPhoneNumber] = useState('90 12 34 56');
+  const [nomPharmacie, setNomPharmacie] = useState('');
+  const [email, setEmail] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const rawWhatsapp = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
+  const cleanNom = nomPharmacie.trim();
+  const cleanEmail = email.trim();
+  const whatsappUrl = `https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(
+    `Bonjour EFA TECH, je souhaite payer les 25.000F pour enregistrer ma pharmacie ${cleanNom || ''}. Email: ${cleanEmail || ''}`
+  )}`;
 
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,6 +193,34 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
               </div>
             </div>
 
+            {/* Nom pharmacie & Email pour personnalisation */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Nom de la pharmacie :
+                </label>
+                <input
+                  type="text"
+                  value={nomPharmacie}
+                  onChange={(e) => setNomPharmacie(e.target.value)}
+                  placeholder="Ex: Pharmacie du Progrès"
+                  className="w-full bg-slate-800 text-white px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Email pro :
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="contact@pharmacie.tg"
+                  className="w-full bg-slate-800 text-white px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
+                />
+              </div>
+            </div>
+
             {/* Phone Input */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-300 block">
@@ -218,11 +256,11 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
               </p>
             </div>
 
-            {/* Bouton demandé exactement */}
+            {/* Bouton USSD */}
             <button
               type="submit"
               disabled={isProcessing}
-              className="w-full min-h-[52px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm sm:text-base shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-60"
+              className="w-full min-h-[50px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-60"
             >
               {isProcessing ? (
                 <>
@@ -236,6 +274,31 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
                 </>
               )}
             </button>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3 pt-2">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                OU VIA WHATSAPP DIRECT
+              </span>
+              <div className="flex-1 h-px bg-slate-800" />
+            </div>
+
+            {/* GROS BOUTON FIXE "Payer 25.000F via WhatsApp" */}
+            <div className="pt-1 sticky bottom-2 z-30">
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full min-h-[56px] py-4 px-6 rounded-2xl bg-[#25D366] hover:bg-[#20ba59] active:bg-[#1da850] text-slate-950 font-black text-sm sm:text-base shadow-2xl shadow-[#25D366]/40 transition-all flex items-center justify-center gap-2.5 cursor-pointer text-center active:scale-98 border-2 border-emerald-300"
+              >
+                <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 fill-slate-950 text-slate-950 shrink-0" />
+                <span>Payer 25.000F via WhatsApp</span>
+              </a>
+              <div className="text-center text-[10px] sm:text-[11px] text-slate-400 mt-1.5 font-medium">
+                Assistance immédiate et validation instantanée sur WhatsApp (+228 96 10 09 72)
+              </div>
+            </div>
           </form>
         )}
       </div>

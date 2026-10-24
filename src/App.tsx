@@ -24,6 +24,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { PharmacienRegisterPage } from './pages/PharmacienRegisterPage';
 import { PaiementInscriptionPage } from './pages/PaiementInscriptionPage';
 import { AdminPharmaciesPage } from './pages/AdminPharmaciesPage';
+import { SuperAdminPage } from './pages/SuperAdminPage';
 import { hasValidRegistrationPaymentToken } from './lib/paymentTokens';
 import { Splash } from './pages/Splash';
 import { PharmaStatsPage } from './pages/PharmaStatsPage';
@@ -211,6 +212,29 @@ export default function App() {
     }
   }, [currentPath]);
 
+  // SECURITE : /super-admin accessible UNIQUEMENT au super admin (si autre user connecté -> redirect /login)
+  useEffect(() => {
+    const isSuperRoute =
+      currentPath === '/super-admin' || currentPath === '/superadmin';
+
+    if (isSuperRoute) {
+      const activeSess = getSession();
+      const superAdminEnvEmail = (
+        process.env.SUPER_ADMIN_EMAIL || 'efatech2@gmail.com'
+      )
+        .trim()
+        .toLowerCase();
+      const isSuper =
+        localStorage.getItem('is_super_admin') === 'true' &&
+        activeSess?.email &&
+        activeSess.email.trim().toLowerCase() === superAdminEnvEmail;
+
+      if (activeSess && !isSuper) {
+        navigateTo('/login');
+      }
+    }
+  }, [currentPath]);
+
   // AUTO REDIRECTION AU DÉMARRAGE (useEffect)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -392,6 +416,16 @@ export default function App() {
     );
   }
 
+  // Route /super-admin : Super Admin Dashboard caché
+  if (currentPath === '/super-admin' || currentPath === '/superadmin') {
+    return (
+      <SuperAdminPage
+        onBackToMap={() => navigateTo('/home')}
+        onNavigateToLogin={() => navigateTo('/login')}
+      />
+    );
+  }
+
   // Route Content Resolver
   let content = null;
   if (
@@ -501,7 +535,11 @@ export default function App() {
         onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
       />
     );
-  } else if (currentPath === '/pharma/login') {
+  } else if (
+    currentPath === '/pharma/login' ||
+    currentPath === '/login' ||
+    currentPath === '/connexion'
+  ) {
     content = (
       <PharmacienLoginPage
         onSuccess={handleAuthPharmaSuccess}

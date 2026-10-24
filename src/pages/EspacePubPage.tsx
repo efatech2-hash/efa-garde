@@ -21,7 +21,8 @@ interface EspacePubPageProps {
 export const EspacePubPage: React.FC<EspacePubPageProps> = () => {
   const [pubs] = useState<Pub[]>(() => loadPubs());
 
-  const whatsappPubContactUrl = `https://wa.me/22896100972?text=${encodeURIComponent(
+  const rawWhatsapp = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
+  const whatsappPubContactUrl = `https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(
     "Bonjour EFA GARDE, je souhaite diffuser une publicité sponsorisée pour mon entreprise / produit de santé sur votre application à Lomé."
   )}`;
 

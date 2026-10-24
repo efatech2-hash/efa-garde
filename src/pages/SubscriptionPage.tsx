@@ -42,8 +42,9 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
   // Redirection directe WhatsApp wa.me/22896100972
   const handlePayWhatsApp = (formule: string) => {
     const pharmaName = currentPharma?.nom || 'ma pharmacie';
-    const message = `Bonjour EFA GARDE, je veux payer abonnement ${formule} pour ${pharmaName}`;
-    const url = `https://wa.me/22896100972?text=${encodeURIComponent(message)}`;
+    const message = `Bonjour EFA TECH, je souhaite payer l'abonnement ${formule} pour ${pharmaName}`;
+    const whatsappNum = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
+    const url = `https://wa.me/${whatsappNum}?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
   };
 

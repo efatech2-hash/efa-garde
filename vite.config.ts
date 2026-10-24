@@ -14,6 +14,9 @@ export default defineConfig(({mode}) => {
       'process.env.SUPER_ADMIN_PASSWORD': JSON.stringify(
         env.SUPER_ADMIN_PASSWORD || process.env.SUPER_ADMIN_PASSWORD || '2hcetafe'
       ),
+      'process.env.WHATSAPP_NUMBER': JSON.stringify(
+        env.WHATSAPP_NUMBER || process.env.WHATSAPP_NUMBER || '22896100972'
+      ),
     },
     plugins: [react(), tailwindcss()],
     resolve: {

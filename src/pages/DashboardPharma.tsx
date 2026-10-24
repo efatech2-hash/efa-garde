@@ -531,8 +531,9 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
             <div className="space-y-2 pt-2 w-full flex flex-col">
               <button
                 onClick={() => {
-                  const msg = `Bonjour EFA GARDE, je veux payer abonnement Plan Star 15.000 FCFA pour ${currentPharma.nom}`;
-                  window.open(`https://wa.me/22896100972?text=${encodeURIComponent(msg)}`, '_blank');
+                  const rawWhatsapp = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
+                  const msg = `Bonjour EFA TECH, je souhaite payer l'abonnement Plan Star 15.000 FCFA pour ${currentPharma.nom}`;
+                  window.open(`https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
                 }}
                 className="w-full min-h-[48px] py-3.5 px-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xs sm:text-sm shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 text-center"
               >

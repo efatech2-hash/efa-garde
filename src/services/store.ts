@@ -167,6 +167,18 @@ export function updatePharmacyPlan(pharmacieId: string, plan: PlanType): Pharmac
   return list[idx];
 }
 
+export function updatePharmacySuperAdmin(
+  pharmacieId: string,
+  updates: Partial<Pharmacie>
+): Pharmacie | null {
+  const list = loadPharmacies();
+  const idx = list.findIndex(p => p.id === pharmacieId);
+  if (idx === -1) return null;
+  list[idx] = { ...list[idx], ...updates };
+  savePharmacies(list);
+  return list[idx];
+}
+
 export function loadGardes(pharmacieId?: string): Garde[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_GARDES);

@@ -9,6 +9,9 @@ export interface Pharmacie {
   adresse: string;
   plan: PlanType;
   is_online: boolean;
+  is_active?: boolean;
+  is_registered?: boolean;
+  subscription_end?: string;
   distanceKm?: number;
   is_pending?: boolean;
   quartier?: string;
