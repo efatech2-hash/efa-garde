@@ -30,7 +30,11 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const rawWhatsapp = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
+  const rawWhatsapp = (
+    import.meta.env.VITE_WHATSAPP_NUMBER ||
+    process.env.WHATSAPP_NUMBER ||
+    '22896100972'
+  ).replace(/[^0-9]/g, '');
   const cleanNom = nomPharmacie.trim();
   const cleanEmail = email.trim();
   const whatsappUrl = `https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(

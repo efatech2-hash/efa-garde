@@ -9,13 +9,13 @@ export default defineConfig(({mode}) => {
   return {
     define: {
       'process.env.SUPER_ADMIN_EMAIL': JSON.stringify(
-        env.SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL || 'efatech2@gmail.com'
+        env.VITE_SUPER_ADMIN_EMAIL || env.SUPER_ADMIN_EMAIL || process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL || 'efatech2@gmail.com'
       ),
       'process.env.SUPER_ADMIN_PASSWORD': JSON.stringify(
-        env.SUPER_ADMIN_PASSWORD || process.env.SUPER_ADMIN_PASSWORD || '2hcetafe'
+        env.VITE_SUPER_ADMIN_PASSWORD || env.SUPER_ADMIN_PASSWORD || process.env.VITE_SUPER_ADMIN_PASSWORD || process.env.SUPER_ADMIN_PASSWORD || '2hcetafe'
       ),
       'process.env.WHATSAPP_NUMBER': JSON.stringify(
-        env.WHATSAPP_NUMBER || process.env.WHATSAPP_NUMBER || '22896100972'
+        env.VITE_WHATSAPP_NUMBER || env.WHATSAPP_NUMBER || process.env.VITE_WHATSAPP_NUMBER || process.env.WHATSAPP_NUMBER || '22896100972'
       ),
     },
     plugins: [react(), tailwindcss()],

@@ -39,8 +39,18 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   onBackToMap,
   onNavigateToLogin,
 }) => {
-  const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || 'efatech2@gmail.com').trim().toLowerCase();
-  const superAdminPassword = (process.env.SUPER_ADMIN_PASSWORD || '2hcetafe').trim();
+  const superAdminEmail = (
+    import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
+    process.env.SUPER_ADMIN_EMAIL ||
+    'efatech2@gmail.com'
+  )
+    .trim()
+    .toLowerCase();
+  const superAdminPassword = (
+    import.meta.env.VITE_SUPER_ADMIN_PASSWORD ||
+    process.env.SUPER_ADMIN_PASSWORD ||
+    '2hcetafe'
+  ).trim();
 
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {

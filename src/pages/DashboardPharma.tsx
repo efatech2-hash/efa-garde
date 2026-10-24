@@ -51,7 +51,13 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
   const session = getSession();
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
 
-  const superAdminEnvEmail = (process.env.SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
+  const superAdminEnvEmail = (
+    import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
+    process.env.SUPER_ADMIN_EMAIL ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
   const isSuperAdmin =
     (session?.email && (session.email.toLowerCase() === 'efatech2@gmail.com' || (superAdminEnvEmail && session.email.toLowerCase() === superAdminEnvEmail))) ||
     localStorage.getItem('is_super_admin') === 'true' ||

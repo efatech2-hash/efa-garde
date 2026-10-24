@@ -220,7 +220,9 @@ export default function App() {
     if (isSuperRoute) {
       const activeSess = getSession();
       const superAdminEnvEmail = (
-        process.env.SUPER_ADMIN_EMAIL || 'efatech2@gmail.com'
+        import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
+        process.env.SUPER_ADMIN_EMAIL ||
+        'efatech2@gmail.com'
       )
         .trim()
         .toLowerCase();

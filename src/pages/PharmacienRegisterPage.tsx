@@ -47,7 +47,11 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
   const [nom, setNom] = useState('');
   const [emailPro, setEmailPro] = useState('');
 
-  const rawWhatsapp = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
+  const rawWhatsapp = (
+    import.meta.env.VITE_WHATSAPP_NUMBER ||
+    process.env.WHATSAPP_NUMBER ||
+    '22896100972'
+  ).replace(/[^0-9]/g, '');
   const [nomPharmacie, setNomPharmacie] = useState('');
   const [motDePasse, setMotDePasse] = useState('');
   const [ifu, setIfu] = useState('');
