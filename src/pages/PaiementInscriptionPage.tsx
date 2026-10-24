@@ -32,7 +32,6 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
 
   const rawWhatsapp = (
     import.meta.env.VITE_WHATSAPP_NUMBER ||
-    process.env.WHATSAPP_NUMBER ||
     '22896100972'
   ).replace(/[^0-9]/g, '');
   const cleanNom = nomPharmacie.trim();

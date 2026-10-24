@@ -53,8 +53,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
 
   const superAdminEnvEmail = (
     import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
-    process.env.SUPER_ADMIN_EMAIL ||
-    ''
+    'efatech2@gmail.com'
   )
     .trim()
     .toLowerCase();
@@ -537,7 +536,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
             <div className="space-y-2 pt-2 w-full flex flex-col">
               <button
                 onClick={() => {
-                  const rawWhatsapp = (process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
+                  const rawWhatsapp = (import.meta.env.VITE_WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
                   const msg = `Bonjour EFA TECH, je souhaite payer l'abonnement Plan Star 15.000 FCFA pour ${currentPharma.nom}`;
                   window.open(`https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
                 }}

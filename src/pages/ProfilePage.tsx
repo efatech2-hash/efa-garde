@@ -304,7 +304,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             <div className="text-[9px] text-slate-400 mt-0.5">Urgences médicales</div>
           </a>
           <a
-            href={`https://wa.me/${(process.env.WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '')}`}
+            href={`https://wa.me/${(import.meta.env.VITE_WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '')}`}
             target="_blank"
             rel="noopener noreferrer"
             className="p-3.5 rounded-2xl bg-emerald-600/20 hover:bg-emerald-600/30 text-white font-bold transition-all hover:scale-[1.02] cursor-pointer border border-emerald-500/40 block shadow-sm"

@@ -45,7 +45,6 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
     const message = `Bonjour EFA TECH, je souhaite payer l'abonnement ${formule} pour ${pharmaName}`;
     const whatsappNum = (
       import.meta.env.VITE_WHATSAPP_NUMBER ||
-      process.env.WHATSAPP_NUMBER ||
       '22896100972'
     ).replace(/[^0-9]/g, '');
     const url = `https://wa.me/${whatsappNum}?text=${encodeURIComponent(message)}`;
