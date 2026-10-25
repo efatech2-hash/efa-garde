@@ -1,4 +1,11 @@
-export type PlanType = 'free' | 'register' | 'top' | 'annual' | '60k';
+export type PlanType =
+  | 'free'
+  | 'register'
+  | 'top'
+  | 'annual'
+  | '60k'
+  | 'populaire_mensuel'
+  | 'populaire_annuel';
 
 export interface Pharmacie {
   id: string;
@@ -12,6 +19,12 @@ export interface Pharmacie {
   is_active?: boolean;
   is_registered?: boolean;
   subscription_end?: string;
+  is_premium?: boolean;
+  etoile_doree?: boolean;
+  position?: number;
+  is_always_visible?: boolean;
+  badge?: string;
+  prix?: number;
   distanceKm?: number;
   is_pending?: boolean;
   quartier?: string;

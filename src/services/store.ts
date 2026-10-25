@@ -122,19 +122,83 @@ export function loadPharmacies(): Pharmacie[] {
           });
         }
         const result = Array.from(uniqueMap.values());
+        const sorted = sortPharmaciesPriority(result);
         // Clean localStorage if duplicates were present
-        if (result.length !== parsed.length) {
-          localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(result));
+        if (sorted.length !== parsed.length) {
+          localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(sorted));
         }
-        return result;
+        return sorted;
       }
     }
   } catch {
     // ignore
   }
   // Initialize with seed data
-  localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(INITIAL_PHARMACIES));
-  return INITIAL_PHARMACIES;
+  const initialSorted = sortPharmaciesPriority(INITIAL_PHARMACIES);
+  localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(initialSorted));
+  return initialSorted;
+}
+
+export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
+  return [...list].sort((a, b) => {
+    const isPopA = Boolean(
+      a.is_premium ||
+        a.etoile_doree ||
+        a.plan === 'populaire_mensuel' ||
+        a.plan === 'populaire_annuel'
+    );
+    const isPopB = Boolean(
+      b.is_premium ||
+        b.etoile_doree ||
+        b.plan === 'populaire_mensuel' ||
+        b.plan === 'populaire_annuel'
+    );
+
+    // 1. is_premium / POPULAIRE first
+    if (isPopA && !isPopB) return -1;
+    if (!isPopA && isPopB) return 1;
+
+    // 2. position (asc, 0 is at top)
+    const posA = a.position !== undefined ? a.position : 999;
+    const posB = b.position !== undefined ? b.position : 999;
+    if (posA !== posB) return posA - posB;
+
+    // 3. etoile_doree (desc)
+    if (a.etoile_doree && !b.etoile_doree) return -1;
+    if (!a.etoile_doree && b.etoile_doree) return 1;
+
+    // 4. alphabetical
+    return a.nom.localeCompare(b.nom);
+  });
+}
+
+/**
+ * Charge les pharmacies depuis Supabase selon les privilèges officiels :
+ * order('is_premium', {ascending:false})
+ * order('position', {ascending:true})
+ * order('etoile_doree', {ascending:false})
+ */
+export async function fetchPharmacies(): Promise<Pharmacie[]> {
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data, error } = await client
+        .from('pharmacies')
+        .select('*')
+        .order('is_premium', { ascending: false })
+        .order('position', { ascending: true })
+        .order('etoile_doree', { ascending: false });
+
+      if (!error && data && Array.isArray(data) && data.length > 0) {
+        const sorted = sortPharmaciesPriority(data as Pharmacie[]);
+        savePharmacies(sorted);
+        return sorted;
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchPharmacies fallback:', err);
+  }
+  return loadPharmacies();
 }
 
 export function savePharmacies(list: Pharmacie[]) {
@@ -144,7 +208,7 @@ export function savePharmacies(list: Pharmacie[]) {
       uniqueMap.set(item.id, item);
     }
   }
-  const cleanList = Array.from(uniqueMap.values());
+  const cleanList = sortPharmaciesPriority(Array.from(uniqueMap.values()));
   localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(cleanList));
   notifyChange();
 }

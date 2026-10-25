@@ -5,6 +5,8 @@ import {
   savePharmacies,
   updatePharmacySuperAdmin,
   subscribeToStore,
+  getSupabaseClient,
+  fetchPharmacies,
 } from '../services/store';
 import { getSession, setSession, clearSession } from '../lib/auth';
 import { Logo } from '../components/Logo';
@@ -114,60 +116,188 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     onNavigateToLogin();
   };
 
-  // 1. Action: Activer 1 an (90.000F) => is_active=true, subscription_end = now + 365j
-  const handleActivate1Year = (p: Pharmacie) => {
+  // 1. Action: BOUTON POPULAIRE MENSUEL (15.000F) : couleur GOLD bg-yellow-500
+  // Au clic : is_active=true, is_premium=true, etoile_doree=true, position=0, plan='populaire_mensuel', subscription_end = now + 30 jours, prix=15000
+  const handleActivatePopulaireMensuel = async (p: Pharmacie) => {
+    const now = new Date();
+    const end = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
+    const updates: Partial<Pharmacie> = {
+      is_active: true,
+      is_premium: true,
+      etoile_doree: true,
+      position: 0,
+      is_always_visible: true,
+      plan: 'populaire_mensuel',
+      subscription_end: end.toISOString(),
+      prix: 15000,
+      badge: 'POPULAIRE',
+      statut: 'approved',
+    };
+
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        await client.from('pharmacies').update(updates).eq('id', p.id);
+      }
+    } catch (err) {
+      console.warn('Supabase update warning:', err);
+    }
+
+    updatePharmacySuperAdmin(p.id, updates);
+    await fetchPharmacies();
+    setPharmacies(loadPharmacies());
+    showToast(`⭐ "${p.nom}" activée en POPULAIRE MENSUEL (15.000F) pour 30 jours !`);
+  };
+
+  // 2. Action: BOUTON POPULAIRE ANNUEL (140.000F) : couleur GOLD dégradé bg-gradient-to-r from-yellow-400 to-yellow-600
+  // Au clic : is_active=true, is_premium=true, etoile_doree=true, position=0, plan='populaire_annuel', subscription_end = now + 365 jours, prix=140000
+  const handleActivatePopulaireAnnuel = async (p: Pharmacie) => {
+    const now = new Date();
+    const end = new Date(now.getTime() + 365 * 24 * 3600 * 1000);
+    const updates: Partial<Pharmacie> = {
+      is_active: true,
+      is_premium: true,
+      etoile_doree: true,
+      position: 0,
+      is_always_visible: true,
+      plan: 'populaire_annuel',
+      subscription_end: end.toISOString(),
+      prix: 140000,
+      badge: 'POPULAIRE',
+      statut: 'approved',
+    };
+
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        await client.from('pharmacies').update(updates).eq('id', p.id);
+      }
+    } catch (err) {
+      console.warn('Supabase update warning:', err);
+    }
+
+    updatePharmacySuperAdmin(p.id, updates);
+    await fetchPharmacies();
+    setPharmacies(loadPharmacies());
+    showToast(`👑 "${p.nom}" activée en POPULAIRE ANNUEL (140.000F) pour 1 an !`);
+  };
+
+  // 3. Action: Activer 1 an (90.000F) => is_active=true, subscription_end = now + 365j
+  const handleActivate1Year = async (p: Pharmacie) => {
     const now = new Date();
     const oneYearLater = new Date(now.getTime() + 365 * 24 * 3600 * 1000);
-    const updated = updatePharmacySuperAdmin(p.id, {
+    const updates: Partial<Pharmacie> = {
       is_active: true,
       subscription_end: oneYearLater.toISOString(),
       plan: 'annual',
       statut: 'approved',
-    });
-    if (updated) {
-      setPharmacies(loadPharmacies());
-      showToast(`✅ "${p.nom}" activée pour 1 an (90.000F) jusqu'au ${oneYearLater.toLocaleDateString('fr-FR')} !`);
+      prix: 90000,
+    };
+
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        await client.from('pharmacies').update(updates).eq('id', p.id);
+      }
+    } catch (err) {
+      console.warn('Supabase update warning:', err);
     }
+
+    updatePharmacySuperAdmin(p.id, updates);
+    await fetchPharmacies();
+    setPharmacies(loadPharmacies());
+    showToast(`✅ "${p.nom}" activée pour 1 an (90.000F) jusqu'au ${oneYearLater.toLocaleDateString('fr-FR')} !`);
   };
 
-  // 2. Action: Activer enregistrement (25.000F) => is_registered=true, is_active=true
-  const handleActivateRegistration = (p: Pharmacie) => {
-    const updated = updatePharmacySuperAdmin(p.id, {
+  // 4. Action: Activer enregistrement (25.000F) => is_registered=true, is_active=true
+  const handleActivateRegistration = async (p: Pharmacie) => {
+    const updates: Partial<Pharmacie> = {
       is_registered: true,
       is_active: true,
       statut: 'approved',
-    });
-    if (updated) {
-      setPharmacies(loadPharmacies());
-      showToast(`✅ Enregistrement (25.000F) validé pour "${p.nom}". Officine active.`);
+      prix: 25000,
+    };
+
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        await client.from('pharmacies').update(updates).eq('id', p.id);
+      }
+    } catch (err) {
+      console.warn('Supabase update warning:', err);
     }
+
+    updatePharmacySuperAdmin(p.id, updates);
+    await fetchPharmacies();
+    setPharmacies(loadPharmacies());
+    showToast(`✅ Enregistrement (25.000F) validé pour "${p.nom}". Officine active.`);
   };
 
-  // 3. Action: Désactiver => is_active=false
-  const handleDeactivate = (p: Pharmacie) => {
-    const updated = updatePharmacySuperAdmin(p.id, {
+  // 5. Action: Désactiver => is_active=false
+  const handleDeactivate = async (p: Pharmacie) => {
+    const updates: Partial<Pharmacie> = {
       is_active: false,
-    });
-    if (updated) {
-      setPharmacies(loadPharmacies());
-      showToast(`⛔ "${p.nom}" désactivée.`);
+    };
+
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        await client.from('pharmacies').update(updates).eq('id', p.id);
+      }
+    } catch (err) {
+      console.warn('Supabase update warning:', err);
     }
+
+    updatePharmacySuperAdmin(p.id, updates);
+    await fetchPharmacies();
+    setPharmacies(loadPharmacies());
+    showToast(`⛔ "${p.nom}" désactivée.`);
   };
 
-  // 4. Action: Prolonger (+30 jours ou +365 jours)
-  const handleExtend = (p: Pharmacie) => {
+  // 6. Action: Réactiver => is_active=true
+  const handleReactivate = async (p: Pharmacie) => {
+    const updates: Partial<Pharmacie> = {
+      is_active: true,
+    };
+
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        await client.from('pharmacies').update(updates).eq('id', p.id);
+      }
+    } catch (err) {
+      console.warn('Supabase update warning:', err);
+    }
+
+    updatePharmacySuperAdmin(p.id, updates);
+    await fetchPharmacies();
+    setPharmacies(loadPharmacies());
+    showToast(`✅ "${p.nom}" réactivée.`);
+  };
+
+  // 7. Action: Prolonger (+30 jours)
+  const handleExtend = async (p: Pharmacie) => {
     const currentEnd = p.subscription_end ? new Date(p.subscription_end) : new Date();
     const baseTime = currentEnd.getTime() > Date.now() ? currentEnd.getTime() : Date.now();
     const newEnd = new Date(baseTime + 30 * 24 * 3600 * 1000);
-
-    const updated = updatePharmacySuperAdmin(p.id, {
+    const updates: Partial<Pharmacie> = {
       is_active: true,
       subscription_end: newEnd.toISOString(),
-    });
-    if (updated) {
-      setPharmacies(loadPharmacies());
-      showToast(`⏳ Abonnement prolongé de 30 jours pour "${p.nom}" (Fin : ${newEnd.toLocaleDateString('fr-FR')}).`);
+    };
+
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        await client.from('pharmacies').update(updates).eq('id', p.id);
+      }
+    } catch (err) {
+      console.warn('Supabase update warning:', err);
     }
+
+    updatePharmacySuperAdmin(p.id, updates);
+    await fetchPharmacies();
+    setPharmacies(loadPharmacies());
+    showToast(`⏳ Abonnement prolongé de 30 jours pour "${p.nom}" (Fin : ${newEnd.toLocaleDateString('fr-FR')}).`);
   };
 
   // Computed Stats
@@ -548,9 +678,9 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                           </span>
                         </td>
 
-                        {/* Statut (Actif/Inactif) */}
+                        {/* Statut (Actif/Inactif + Plan Badge) */}
                         <td className="py-4 px-4">
-                          <div className="flex flex-col gap-1 items-start">
+                          <div className="flex flex-col gap-1.5 items-start">
                             {isActive ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -562,9 +692,26 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                                 Inactif
                               </span>
                             )}
-                            {isRegistered && (
-                              <span className="text-[10px] text-emerald-400 font-semibold">
-                                ✓ Enregistrement payé
+
+                            {/* Badges officiels du plan EFA GARDE */}
+                            {p.plan === 'populaire_annuel' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-yellow-400 to-yellow-600 text-slate-950 shadow-xs">
+                                👑 POPULAIRE ANNUEL
+                              </span>
+                            )}
+                            {p.plan === 'populaire_mensuel' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-yellow-500 text-slate-950 shadow-xs">
+                                ⭐ POPULAIRE MENSUEL
+                              </span>
+                            )}
+                            {(p.plan === 'annual' || p.plan === '60k') && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                💼 90K ANNUEL
+                              </span>
+                            )}
+                            {p.is_registered && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                                📝 ENREGISTREMENT 25K
                               </span>
                             )}
                           </div>
@@ -578,14 +725,34 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                         {/* Actions */}
                         <td className="py-4 px-4 sm:px-6 text-right">
                           <div className="flex items-center justify-end flex-wrap gap-1.5">
-                            {/* Activer 1 an (90.000F) */}
+                            {/* BOUTON POPULAIRE MENSUEL (15.000F) : couleur GOLD bg-yellow-500 */}
+                            <button
+                              type="button"
+                              onClick={() => handleActivatePopulaireMensuel(p)}
+                              className="px-2.5 py-1.5 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-black text-[11px] shadow-sm transition-all cursor-pointer active:scale-95"
+                              title="Activer POPULAIRE MENSUEL (15.000F / mois, privilèges Gold, position 0)"
+                            >
+                              ⭐ Populaire Mensuel (15.000F)
+                            </button>
+
+                            {/* BOUTON POPULAIRE ANNUEL (140.000F) : couleur GOLD dégradé bg-gradient-to-r from-yellow-400 to-yellow-600 */}
+                            <button
+                              type="button"
+                              onClick={() => handleActivatePopulaireAnnuel(p)}
+                              className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-yellow-400 to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-slate-950 font-black text-[11px] shadow-md transition-all cursor-pointer active:scale-95"
+                              title="Activer POPULAIRE ANNUEL (140.000F / an, privilèges Gold, position 0)"
+                            >
+                              👑 Populaire Annuel (140.000F)
+                            </button>
+
+                            {/* Activer 1 an 90k */}
                             <button
                               type="button"
                               onClick={() => handleActivate1Year(p)}
                               className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-white font-bold text-[11px] transition-all cursor-pointer shadow-xs active:scale-95"
                               title="Activer l'officine pour 1 an (90.000 FCFA)"
                             >
-                              ⭐ Activer 1 an (90.000F)
+                              💼 Activer 1 an (90.000F)
                             </button>
 
                             {/* Activer enregistrement (25.000F) */}
@@ -598,17 +765,17 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                               📝 Activer enreg. (25.000F)
                             </button>
 
-                            {/* Prolonger */}
+                            {/* Prolonger +30j */}
                             <button
                               type="button"
                               onClick={() => handleExtend(p)}
                               className="px-2.5 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 hover:text-white font-bold text-[11px] transition-all cursor-pointer shadow-xs active:scale-95"
                               title="Prolonger l'abonnement de 30 jours"
                             >
-                              ⏳ Prolonger
+                              ⏳ Prolonger +30j
                             </button>
 
-                            {/* Désactiver / Activer toggle */}
+                            {/* Désactiver / Réactiver toggle */}
                             {isActive ? (
                               <button
                                 type="button"
@@ -621,11 +788,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  updatePharmacySuperAdmin(p.id, { is_active: true });
-                                  setPharmacies(loadPharmacies());
-                                  showToast(`✅ "${p.nom}" réactivée.`);
-                                }}
+                                onClick={() => handleReactivate(p)}
                                 className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition-all cursor-pointer shadow-xs active:scale-95"
                                 title="Réactiver l'officine"
                               >

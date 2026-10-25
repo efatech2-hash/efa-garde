@@ -20,8 +20,14 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
   userLocation,
 }) => {
   const isOnline = pharmacy.is_online;
-  const isTop = pharmacy.plan === 'top';
-  const isPaid = pharmacy.plan === 'top' || pharmacy.plan === '60k';
+  const isPopulaire = Boolean(
+    pharmacy.is_premium ||
+      pharmacy.etoile_doree ||
+      pharmacy.plan === 'populaire_mensuel' ||
+      pharmacy.plan === 'populaire_annuel'
+  );
+  const isTop = pharmacy.plan === 'top' && !isPopulaire;
+  const isPaid = isPopulaire || pharmacy.plan === 'top' || pharmacy.plan === '60k';
   const itineraireUrl = getGoogleMapsNavigationUrl(
     pharmacy.lat,
     pharmacy.lng,
@@ -30,7 +36,13 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
   );
 
   return (
-    <div className="relative bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-5 shadow-2xl text-slate-100 max-w-md w-full animate-in fade-in slide-in-from-bottom-4 duration-200">
+    <div
+      className={`relative bg-slate-900/95 backdrop-blur-xl rounded-2xl p-5 shadow-2xl text-slate-100 max-w-md w-full animate-in fade-in slide-in-from-bottom-4 duration-200 ${
+        isPopulaire
+          ? 'border-2 border-amber-400 shadow-amber-500/20'
+          : 'border border-slate-700/80'
+      }`}
+    >
       {onClose && (
         <button
           onClick={onClose}
@@ -44,6 +56,13 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
 
       {/* Header Badges */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
+        {isPopulaire && (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-950 shadow-md">
+            <Star className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
+            ⭐ POPULAIRE • EN TÊTE DE LISTE
+          </span>
+        )}
+
         {isTop && (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40">
             <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
@@ -51,7 +70,7 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
           </span>
         )}
 
-        {pharmacy.plan === '60k' && (
+        {pharmacy.plan === '60k' && !isPopulaire && (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
             Plan Annuel 60k
           </span>
@@ -92,6 +111,13 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
         )}
       </div>
 
+      {isPopulaire && (
+        <div className="mb-3 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-2">
+          <span>⭐</span>
+          <span>Officine mise en avant en première position à Lomé</span>
+        </div>
+      )}
+
       {pharmacy.is_pending && (
         <div className="mb-3 p-2.5 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-200">
           ⏳ Cette pharmacie a été ajoutée récemment et est en cours de vérification administrative.
@@ -100,7 +126,12 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
 
       {/* Pharmacy Name & Address */}
       <h3 className="text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
-        {pharmacy.nom}
+        <span>{pharmacy.nom}</span>
+        {isPopulaire && (
+          <span className="text-amber-400 text-xl shrink-0" title="Étoile dorée POPULAIRE">
+            ⭐
+          </span>
+        )}
       </h3>
 
       <div className="flex items-start gap-2 text-sm text-slate-300 mt-2 mb-3">

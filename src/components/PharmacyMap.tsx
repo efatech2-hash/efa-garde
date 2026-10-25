@@ -87,7 +87,13 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
 
       // Règles visuelles
       const isPending = p.is_pending || p.statut === 'pending';
-      const isPaidAndOnline = !isPending && (p.plan === '60k' || p.plan === 'top') && p.is_online;
+      const isPopulaire = !isPending && Boolean(
+        p.is_premium ||
+          p.etoile_doree ||
+          p.plan === 'populaire_mensuel' ||
+          p.plan === 'populaire_annuel'
+      );
+      const isPaidAndOnline = !isPending && (isPopulaire || p.plan === '60k' || p.plan === 'top') && p.is_online;
       const isTop = !isPending && p.plan === 'top';
 
       let bgClass = 'bg-slate-500 border-slate-400 text-slate-200';
@@ -100,6 +106,15 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
           <span class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-500 text-slate-950 font-black rounded-full flex items-center justify-center text-[9px] shadow border border-white">
             ⏳
           </span>
+        `;
+      } else if (isPopulaire) {
+        // PIN GOLD POPULAIRE PRIVILÈGE
+        bgClass = 'bg-gradient-to-tr from-amber-500 to-yellow-400 border-yellow-100 text-slate-950 shadow-xl shadow-amber-500/50';
+        ringHtml = `
+          <span class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-yellow-300 text-slate-950 font-black rounded-full flex items-center justify-center text-[11px] shadow border border-white">
+            ⭐
+          </span>
+          <span class="absolute -inset-1.5 rounded-full bg-amber-400/40 marker-pulse -z-10"></span>
         `;
       } else if (isPaidAndOnline) {
         if (isTop) {

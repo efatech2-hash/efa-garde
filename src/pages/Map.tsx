@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Pharmacie } from '../types';
 import { PharmacyMap } from '../components/PharmacyMap';
 import { PharmacyCard } from '../components/PharmacyCard';
-import { trackItineraryClick, recordClientContact } from '../services/store';
+import { trackItineraryClick, recordClientContact, fetchPharmacies } from '../services/store';
 import {
   get3ClosestPharmacies,
   getDistance,
@@ -136,7 +136,14 @@ export const Map: React.FC<MapProps> = ({
     );
   };
 
-  // 2 & 3. CALCUL DE DISTANCE & TRI AUTOMATIQUE PAR DISTANCE CROISSANTE
+  // Sync pharmacies from Supabase with official privileges ordering
+  useEffect(() => {
+    fetchPharmacies().catch((err) =>
+      console.warn('Map initial fetchPharmacies fallback:', err)
+    );
+  }, []);
+
+  // 2 & 3. CALCUL DE DISTANCE & TRI PRIVILÈGE POPULAIRE (TÊTE DE LISTE) + DISTANCE
   const displayedPharmacies = useMemo(() => {
     // Déduplication stricte par ID pour éviter toute clé React en double
     const seenIds = new Set<string>();
@@ -151,7 +158,10 @@ export const Map: React.FC<MapProps> = ({
         const matchSearch =
           p.nom.toLowerCase().includes(searchQuery.toLowerCase()) ||
           p.adresse.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchOnline = onlyOnline ? p.is_online : true;
+        // Si is_always_visible=true, ne jamais les filtrer même si garde = false (onlyOnline)
+        const matchOnline = onlyOnline
+          ? Boolean(p.is_online || p.is_always_visible)
+          : true;
         return matchSearch && matchOnline;
       })
       .map((p) => {
@@ -161,12 +171,38 @@ export const Map: React.FC<MapProps> = ({
         return { ...p, distanceKm: dist };
       })
       .sort((a, b) => {
-        // Quand localisation active : trier par distance croissante absolue
+        // 1. Privilèges officiels POPULAIRE GOLD :
+        // order('is_premium', {ascending:false}).order('position', {ascending:true}).order('etoile_doree', {ascending:false})
+        const isPopA = Boolean(
+          a.is_premium ||
+            a.etoile_doree ||
+            a.plan === 'populaire_mensuel' ||
+            a.plan === 'populaire_annuel'
+        );
+        const isPopB = Boolean(
+          b.is_premium ||
+            b.etoile_doree ||
+            b.plan === 'populaire_mensuel' ||
+            b.plan === 'populaire_annuel'
+        );
+
+        if (isPopA && !isPopB) return -1;
+        if (!isPopA && isPopB) return 1;
+
+        if (isPopA && isPopB) {
+          const posA = a.position !== undefined ? a.position : 999;
+          const posB = b.position !== undefined ? b.position : 999;
+          if (posA !== posB) return posA - posB;
+          if (a.etoile_doree && !b.etoile_doree) return -1;
+          if (!a.etoile_doree && b.etoile_doree) return 1;
+        }
+
+        // 2. Quand localisation active : trier par distance croissante absolue
         if (userLocation && a.distanceKm !== undefined && b.distanceKm !== undefined) {
           return a.distanceKm - b.distanceKm;
         }
 
-        // Sinon tri standard : plan top en premier, puis en ligne, puis nom
+        // 3. Sinon tri standard : plan top en premier, puis en ligne, puis nom
         if (a.plan === 'top' && b.plan !== 'top') return -1;
         if (b.plan === 'top' && a.plan !== 'top') return 1;
 

@@ -499,14 +499,26 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                 <span className="text-xs uppercase font-extrabold text-slate-400">
                   Visibilité Officine Lomé
                 </span>
-                {currentPharma.plan === 'top' ? (
-                  <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-400/20 text-amber-300 border border-amber-400/40 flex items-center gap-1">
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                    TOP 1 (10k/mois)
+                {currentPharma.plan === 'populaire_annuel' ? (
+                  <span className="px-2.5 py-1 rounded-full text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-950 flex items-center gap-1 shadow-sm">
+                    <Star className="w-3 h-3 fill-slate-950 text-slate-950" />
+                    POPULAIRE • 140.000F/an
                   </span>
-                ) : currentPharma.plan === '60k' ? (
+                ) : currentPharma.plan === 'populaire_mensuel' ||
+                  currentPharma.plan === 'top' ||
+                  Boolean(currentPharma.etoile_doree) ||
+                  Boolean(currentPharma.is_premium) ? (
+                  <span className="px-2.5 py-1 rounded-full text-xs font-black bg-yellow-400 text-slate-950 flex items-center gap-1 shadow-sm">
+                    <Star className="w-3 h-3 fill-slate-950 text-slate-950" />
+                    POPULAIRE • 15.000F/mois
+                  </span>
+                ) : currentPharma.plan === 'annual' || currentPharma.plan === '60k' ? (
                   <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    Annuel 60k/an
+                    Standard 90.000F/an
+                  </span>
+                ) : currentPharma.is_registered ? (
+                  <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    Enregistrement 25.000F
                   </span>
                 ) : (
                   <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700">
@@ -518,42 +530,186 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                 <CreditCard className="w-5 h-5 text-amber-400" />
                 <span>Mon Abonnement EFA GARDE</span>
               </h3>
-              <p className="text-xs sm:text-sm text-slate-300 mt-1 leading-relaxed">
-                {currentPharma.plan === 'top'
+              {/* Si POPULAIRE : afficher icône dorée + texte tête de liste */}
+              {(currentPharma.plan === 'populaire_mensuel' ||
+                currentPharma.plan === 'populaire_annuel' ||
+                currentPharma.plan === 'top' ||
+                Boolean(currentPharma.etoile_doree) ||
+                Boolean(currentPharma.is_premium)) && (
+                <div className="mt-2.5 p-2.5 rounded-2xl bg-amber-400/15 border border-amber-400/40 flex items-center gap-2 text-amber-300 font-extrabold text-xs shadow-inner">
+                  <span className="text-base">⭐</span>
+                  <span>Votre pharmacie est en TÊTE DE LISTE à Lomé</span>
+                </div>
+              )}
+
+              <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
+                {currentPharma.plan === 'populaire_mensuel' ||
+                currentPharma.plan === 'populaire_annuel' ||
+                currentPharma.plan === 'top' ||
+                Boolean(currentPharma.etoile_doree)
                   ? 'Votre pharmacie est affichée avec une étoile dorée et en 1ère position absolue.'
-                  : currentPharma.plan === '60k'
+                  : currentPharma.plan === 'annual' || currentPharma.plan === '60k'
                   ? 'Votre pharmacie apparaît avec un marqueur VERT vif de garde et priorité standard.'
-                  : 'Passez au plan TOP pour garantir la première place et doubler vos clients.'}
+                  : 'Passez au plan POPULAIRE pour garantir la première place et doubler vos clients.'}
               </p>
             </div>
 
-            {paymentNotice15000 && (
-              <div className="p-3 rounded-xl text-xs bg-slate-800 border border-blue-500/40 text-blue-300">
-                {paymentNotice15000}
-              </div>
-            )}
+            {/* COMPTE À REBOURS ABONNEMENT */}
+            {(() => {
+              const isPop =
+                currentPharma.plan === 'populaire_mensuel' ||
+                currentPharma.plan === 'populaire_annuel' ||
+                currentPharma.plan === 'top' ||
+                Boolean(currentPharma.etoile_doree) ||
+                Boolean(currentPharma.is_premium);
 
-            <div className="space-y-2 pt-2 w-full flex flex-col">
-              <button
-                onClick={() => {
-                  const rawWhatsapp = (import.meta.env.VITE_WHATSAPP_NUMBER || '22896100972').replace(/[^0-9]/g, '');
-                  const msg = `Bonjour EFA TECH, je souhaite payer l'abonnement Plan Star 15.000 FCFA pour ${currentPharma.nom}`;
-                  window.open(`https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
-                }}
-                className="w-full min-h-[48px] py-3.5 px-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xs sm:text-sm shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 text-center"
-              >
-                <CreditCard className="w-4 h-4 shrink-0" />
-                <span>Payer par T-Money / Flooz / Moov (15.000 FCFA)</span>
-              </button>
+              const planBadgeText =
+                currentPharma.plan === 'populaire_annuel'
+                  ? 'POPULAIRE - ANNUEL 140.000F'
+                  : currentPharma.plan === 'populaire_mensuel' || isPop
+                  ? 'POPULAIRE - 15.000F/mois'
+                  : currentPharma.plan === 'annual' || currentPharma.plan === '60k'
+                  ? 'STANDARD - 90.000F/an'
+                  : currentPharma.is_registered
+                  ? 'ENREGISTREMENT - 25.000F'
+                  : 'PLAN GRATUIT';
 
-              <button
-                onClick={() => onNavigate('abonnement')}
-                className="w-full min-h-[44px] py-2.5 px-3 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer text-center"
-              >
-                <span>Voir toutes les formules T-Money / Flooz / Moov</span>
-                <ArrowRight className="w-3.5 h-3.5 shrink-0" />
-              </button>
-            </div>
+              const nowMs = Date.now();
+              const subEndMs = currentPharma.subscription_end
+                ? new Date(currentPharma.subscription_end).getTime()
+                : null;
+              const daysRemaining = subEndMs
+                ? Math.ceil((subEndMs - nowMs) / 86400000)
+                : null;
+              const isUrgentRenew = daysRemaining !== null && daysRemaining < 7;
+
+              const formatExpDate = () => {
+                if (!currentPharma.subscription_end) return 'Non défini';
+                const d = new Date(currentPharma.subscription_end);
+                const day = String(d.getDate()).padStart(2, '0');
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const year = d.getFullYear();
+                return `${day}/${month}/${year} à 23h59`;
+              };
+
+              const rawW = (
+                import.meta.env.VITE_WHATSAPP_NUMBER || '22896100972'
+              ).replace(/[^0-9]/g, '');
+              const planForMsg = currentPharma.plan || (isPop ? 'POPULAIRE' : 'STANDARD');
+              const renewWUrl = `https://wa.me/${rawW}?text=${encodeURIComponent(
+                `Bonjour EFA GARDE je veux renouveler ${currentPharma.nom} Plan ${planForMsg}`
+              )}`;
+
+              return (
+                <>
+                  <div
+                    className={`p-4 rounded-2xl border text-xs space-y-2.5 transition-all ${
+                      isPop
+                        ? 'bg-amber-500/10 border-amber-400 text-amber-100 shadow-sm'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-black text-xs uppercase tracking-wider pb-1.5 border-b border-amber-500/20">
+                      <span className="flex items-center gap-1.5 text-amber-400">
+                        <Clock className="w-4 h-4 shrink-0" />
+                        <span>COMPTE À REBOURS ABONNEMENT</span>
+                      </span>
+                      <span className="font-mono text-[10px] bg-slate-900/80 px-2 py-0.5 rounded-lg border border-slate-700 text-amber-300">
+                        {isPop ? 'OFFRE GOLD' : 'STANDARD'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs pt-0.5">
+                      <span className="text-slate-400 font-medium">
+                        Vous avez l'abonnement :
+                      </span>
+                      <span className="font-bold text-white bg-slate-900/60 px-2.5 py-0.5 rounded-lg border border-slate-700">
+                        [{planBadgeText}]
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400 font-medium">
+                        Il vous reste :
+                      </span>
+                      {daysRemaining !== null ? (
+                        daysRemaining <= 0 ? (
+                          <span className="font-black text-red-400 bg-red-950/60 px-2 py-0.5 rounded border border-red-500/30">
+                            Abonnement expiré (0 jour)
+                          </span>
+                        ) : (
+                          <span
+                            className={`font-black text-sm ${
+                              isUrgentRenew
+                                ? 'text-red-400 animate-pulse'
+                                : 'text-emerald-400'
+                            }`}
+                          >
+                            {daysRemaining} jour{daysRemaining > 1 ? 's' : ''}
+                          </span>
+                        )
+                      ) : (
+                        <span className="italic text-slate-500">Non défini</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400 font-medium">
+                        Expire le :
+                      </span>
+                      <span className="font-mono font-bold text-white">
+                        {formatExpDate()}
+                      </span>
+                    </div>
+
+                    {/* Si jours < 7 : ROUGE clignotant Renouvellement urgent + bouton WhatsApp */}
+                    {isUrgentRenew && (
+                      <div className="p-2.5 rounded-xl bg-red-950/80 border border-red-500 text-red-200 text-xs font-black flex items-center justify-between gap-2 animate-pulse">
+                        <div className="flex items-center gap-1.5">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                          <span>Renouvellement urgent (moins de 7 jours)</span>
+                        </div>
+                        <a
+                          href={renewWUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1 rounded-lg bg-[#25D366] hover:bg-[#20ba59] text-slate-950 font-black text-[11px] shrink-0"
+                        >
+                          WhatsApp
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  {paymentNotice15000 && (
+                    <div className="p-3 rounded-xl text-xs bg-slate-800 border border-blue-500/40 text-blue-300">
+                      {paymentNotice15000}
+                    </div>
+                  )}
+
+                  <div className="space-y-2 pt-1 w-full flex flex-col">
+                    {/* Bouton "Voir mes formules / Renouveler" */}
+                    <a
+                      href={renewWUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full min-h-[48px] py-3.5 px-3 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 text-center"
+                    >
+                      <Star className="w-4 h-4 fill-slate-950 shrink-0" />
+                      <span>Voir mes formules / Renouveler</span>
+                    </a>
+
+                    <button
+                      onClick={() => onNavigate('abonnement')}
+                      className="w-full min-h-[44px] py-2.5 px-3 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer text-center"
+                    >
+                      <span>Voir toutes les formules T-Money / Flooz / Moov</span>
+                      <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
 
