@@ -24,6 +24,8 @@ import {
   CreditCard,
   Hash,
   MessageCircle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface PharmacienRegisterPageProps {
@@ -53,6 +55,9 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
   ).replace(/[^0-9]/g, '');
   const [nomPharmacie, setNomPharmacie] = useState('');
   const [motDePasse, setMotDePasse] = useState('');
+  const [confirmMotDePasse, setConfirmMotDePasse] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [ifu, setIfu] = useState('');
 
   const whatsappUrl = `https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(
@@ -141,6 +146,11 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
 
     if (motDePasse.length < 6) {
       setErrorMsg('Le mot de passe doit comporter au moins 6 caractères.');
+      return;
+    }
+
+    if (confirmMotDePasse && motDePasse !== confirmMotDePasse) {
+      setErrorMsg('Les mots de passe ne correspondent pas.');
       return;
     }
 
@@ -355,18 +365,62 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">
-                    Mot de passe <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Min. 6 caractères"
-                    value={motDePasse}
-                    onChange={(e) => setMotDePasse(e.target.value)}
-                    className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-xl border border-slate-700 text-sm focus:border-emerald-500 focus:outline-none font-mono"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">
+                      Mot de passe <span className="text-red-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        required
+                        placeholder="Min. 6 caractères"
+                        value={motDePasse}
+                        onChange={(e) => setMotDePasse(e.target.value)}
+                        className="w-full bg-slate-800 text-white pl-3 pr-10 py-2.5 rounded-xl border border-slate-700 text-sm focus:border-emerald-500 focus:outline-none font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-gray-500 hover:text-gray-300 transition-colors p-1"
+                        aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">
+                      Confirmer mot de passe <span className="text-red-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? "text" : "password"}
+                        required
+                        placeholder="Répétez le mot de passe"
+                        value={confirmMotDePasse}
+                        onChange={(e) => setConfirmMotDePasse(e.target.value)}
+                        className="w-full bg-slate-800 text-white pl-3 pr-10 py-2.5 rounded-xl border border-slate-700 text-sm focus:border-emerald-500 focus:outline-none font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-gray-500 hover:text-gray-300 transition-colors p-1"
+                        aria-label={showConfirmPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

@@ -30,6 +30,8 @@ import {
   Power,
   ChevronRight,
   Filter,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface SuperAdminPageProps {
@@ -63,6 +65,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   // Login Gate inputs (if not already authenticated)
   const [gateEmail, setGateEmail] = useState('');
   const [gatePassword, setGatePassword] = useState('');
+  const [showGatePassword, setShowGatePassword] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
 
   // Pharmacy Data
@@ -391,14 +394,28 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
               <label className="text-xs font-bold text-slate-300">
                 Mot de passe Super Admin :
               </label>
-              <input
-                type="password"
-                required
-                value={gatePassword}
-                onChange={(e) => setGatePassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-slate-800 text-white px-4 py-3 rounded-xl border border-slate-700 text-sm focus:outline-none focus:border-amber-400 shadow-inner"
-              />
+              <div className="relative">
+                <input
+                  type={showGatePassword ? "text" : "password"}
+                  required
+                  value={gatePassword}
+                  onChange={(e) => setGatePassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-slate-800 text-white pl-4 pr-10 py-3 rounded-xl border border-slate-700 text-sm focus:outline-none focus:border-amber-400 shadow-inner font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGatePassword(!showGatePassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-gray-500 hover:text-gray-300 transition-colors p-1"
+                  aria-label={showGatePassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                >
+                  {showGatePassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <button

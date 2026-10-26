@@ -17,6 +17,8 @@ import {
   Sparkles,
   PlusCircle,
   X,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface PharmacienLoginPageProps {
@@ -33,6 +35,7 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isCheckEmail, setIsCheckEmail] = useState(false);
@@ -344,13 +347,25 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   required
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-3 focus:outline-none focus:border-emerald-500 placeholder:text-slate-500 transition-colors shadow-inner"
+                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-10 py-3 focus:outline-none focus:border-emerald-500 placeholder:text-slate-500 transition-colors shadow-inner"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-gray-500 hover:text-gray-300 transition-colors p-1"
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
               </div>
             </div>
 
