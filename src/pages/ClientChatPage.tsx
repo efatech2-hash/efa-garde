@@ -11,6 +11,7 @@ import {
   isMessageExpired
 } from '../services/store';
 import { playNotificationSound } from '../services/sound';
+import { compressChatImage } from '../utils/imageCompressor';
 import {
   Send,
   ArrowLeft,
@@ -439,19 +440,35 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   // ==========================================
   // PHOTO & CAMERA HANDLERS (preview avant envoi)
   // ==========================================
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     const file = files[0];
-    const previewUrl = URL.createObjectURL(file);
-    setPendingPhoto({
-      file,
-      previewUrl,
-      caption: '',
-    });
-    // Reset file input to allow re-selection
-    e.target.value = '';
+
+    // 1. Refus strict si > 1 Mo
+    if (file.size > 1024 * 1024) {
+      showToast('Fichier supérieur à 1 Mo refusé. Veuillez sélectionner une photo de moins de 1 Mo.');
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      // 2. Compression auto côté client à max 500 Ko / 1024px au format WebP
+      const processedFile = await compressChatImage(file);
+      const previewUrl = URL.createObjectURL(processedFile);
+      setPendingPhoto({
+        file: processedFile,
+        previewUrl,
+        caption: '',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur compression photo';
+      showToast(msg);
+    } finally {
+      // Reset file input to allow re-selection
+      e.target.value = '';
+    }
   };
 
   const handleSendPhoto = async () => {
@@ -717,10 +734,10 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         <div className="max-w-md mx-auto bg-amber-50/90 border border-amber-200/80 rounded-xl p-2.5 text-center shadow-xs">
           <div className="flex items-center justify-center gap-1.5 text-amber-800 text-[11px] font-bold">
             <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            <span>CONFIDENTIALITÉ MÉDICALE & AUTO-CLEAN 48H</span>
+            <span>CONFIDENTIALITÉ MÉDICALE & AUTO-CLEAN 24H</span>
           </div>
           <p className="text-[10px] text-amber-700 mt-0.5 leading-snug">
-            Vos messages et ordonnances sont strictement confidentiels et sont automatiquement effacés après 48h.
+            Vos messages et ordonnances sont strictement confidentiels et sont automatiquement effacés après 24h.
           </p>
         </div>
 
@@ -970,10 +987,16 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex flex-col justify-between p-3 sm:p-6 animate-in fade-in duration-200">
           {/* Top Preview Bar */}
           <div className="flex items-center justify-between text-white">
-            <span className="text-sm font-semibold flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <ImageIcon className="w-5 h-5 text-emerald-400" />
-              Aperçu photo avant envoi
-            </span>
+              <span className="text-sm font-semibold">Aperçu photo</span>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                {(pendingPhoto.file.size / 1024).toFixed(0)} Ko • WebP
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Auto-delete 24h
+              </span>
+            </div>
             <button
               onClick={handleCancelPhoto}
               className="p-2 rounded-full hover:bg-white/20 text-white transition-colors cursor-pointer"

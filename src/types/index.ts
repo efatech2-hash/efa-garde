@@ -89,7 +89,7 @@ export interface Message {
   sender: 'client' | 'pharma';
   text: string;
   created_at: string;
-  expires_at?: string; // created_at + 48h
+  expires_at?: string; // created_at + 24h (suppression automatique 24h)
   type?: 'text' | 'image' | 'audio';
   media_url?: string;
   audio_duration?: number;

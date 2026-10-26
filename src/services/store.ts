@@ -358,7 +358,7 @@ export function getOrCreateConversation(clientId: string, pharmacieId: string): 
   return newConv;
 }
 
-const MS_48_HOURS = 48 * 60 * 60 * 1000;
+export const MS_24_HOURS = 24 * 60 * 60 * 1000;
 
 export function isMessageExpired(m: Message): boolean {
   const now = Date.now();
@@ -366,7 +366,7 @@ export function isMessageExpired(m: Message): boolean {
     return new Date(m.expires_at).getTime() <= now;
   }
   const created = new Date(m.created_at).getTime();
-  return now - created >= MS_48_HOURS;
+  return now - created >= MS_24_HOURS;
 }
 
 export function loadMessages(conversationId: string): Message[] {
@@ -382,7 +382,7 @@ export function loadMessages(conversationId: string): Message[] {
             sender: 'client',
             text: 'Bonjour, avez-vous du Paracétamol 1000mg en stock ?',
             created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-            expires_at: new Date(Date.now() - 15 * 60 * 1000 + MS_48_HOURS).toISOString(),
+            expires_at: new Date(Date.now() - 15 * 60 * 1000 + MS_24_HOURS).toISOString(),
             type: 'text'
           },
           {
@@ -391,7 +391,7 @@ export function loadMessages(conversationId: string): Message[] {
             sender: 'pharma',
             text: 'Bonjour ! Oui, nous en avons disponible en boîte de 8 et 16 comprimés. Vous pouvez passer.',
             created_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-            expires_at: new Date(Date.now() - 12 * 60 * 1000 + MS_48_HOURS).toISOString(),
+            expires_at: new Date(Date.now() - 12 * 60 * 1000 + MS_24_HOURS).toISOString(),
             type: 'text'
           }
         ]
@@ -399,7 +399,7 @@ export function loadMessages(conversationId: string): Message[] {
       localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
     }
     const list = all[conversationId] || [];
-    // Filtre automatique 48h : les messages de plus de 48h ne s'affichent plus
+    // Filtre automatique 24h : les messages de plus de 24h ne s'affichent plus
     return list.filter((m) => !isMessageExpired(m));
   } catch {
     return [];
@@ -421,8 +421,8 @@ export function addMessage(
   const list = (all[conversationId] || []).filter((m) => !isMessageExpired(m));
 
   const createdAt = new Date().toISOString();
-  // Table messages : colonne expires_at = created_at + 48h
-  const expiresAt = new Date(Date.now() + MS_48_HOURS).toISOString();
+  // Table messages : colonne expires_at = created_at + 24h (Suppression automatique 24h)
+  const expiresAt = new Date(Date.now() + MS_24_HOURS).toISOString();
 
   const newMsg: Message = {
     id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -494,15 +494,18 @@ export function addMessage(
 }
 
 /**
- * AUTO CLEAN 48H :
- * - Supprime tous les messages dont expires_at < now() ou plus vieux que 48h
+ * AUTO CLEAN 24H (MESSAGES & PHOTOS) :
+ * - Supprime tous les messages dont expires_at < now() ou créés il y a plus de 24h
  * - Exécute la suppression locale dans localStorage
- * - Exécute le DELETE SQL sur Supabase: DELETE FROM messages WHERE expires_at < NOW()
+ * - Exécute le DELETE SQL sur Supabase:
+ *   DELETE FROM messages WHERE created_at < NOW() - INTERVAL '24 hours';
+ *   DELETE FROM messages WHERE expires_at < NOW();
+ * - Invoque l'Edge Function cleanup-garde pour purger garde.messages et storage.objects
  */
 export async function cleanExpiredMessages(): Promise<number> {
   const now = Date.now();
   const nowIso = new Date().toISOString();
-  const threshold48hIso = new Date(now - MS_48_HOURS).toISOString();
+  const threshold24hIso = new Date(now - MS_24_HOURS).toISOString();
   let cleanedCount = 0;
 
   // 1. Nettoyage LocalStorage
@@ -528,12 +531,18 @@ export async function cleanExpiredMessages(): Promise<number> {
     console.warn('Erreur cleanExpiredMessages local:', err);
   }
 
-  // 2. Nettoyage cloud : DELETE FROM messages WHERE expires_at < NOW()
+  // 2. Nettoyage cloud Supabase : DELETE FROM messages WHERE created_at < NOW() - INTERVAL '24 hours'
   try {
     const sb = getSupabaseClient();
     if (sb) {
       await sb.from('messages').delete().lt('expires_at', nowIso);
-      await sb.from('messages').delete().lt('created_at', threshold48hIso);
+      await sb.from('messages').delete().lt('created_at', threshold24hIso);
+
+      // Invoque l'Edge Function cleanup-garde pour suppression auto 24h côté serveur
+      sb.functions
+        .invoke('cleanup-garde')
+        .then(() => {})
+        .catch(() => {});
     }
   } catch (err) {
     console.log('Auto clean sync:', err);
@@ -543,32 +552,57 @@ export async function cleanExpiredMessages(): Promise<number> {
 }
 
 /**
- * Upload Audio or Image to Supabase Storage with local Data URL fallback
+ * Upload Audio ou Image vers Supabase Storage :
+ * - Bucket 'garde-photo' (avec fallback 'garde-ordonnances' et 'chat-media')
+ * - Max 500 Ko par fichier compressé
+ * - Refus strict si > 1 Mo
  */
 export async function uploadMediaToSupabase(
   fileOrBlob: Blob | File,
   folder: 'audio' | 'images',
   filename?: string
 ): Promise<string> {
+  // 3. Stockage : Refuse si > 1 Mo
+  if (fileOrBlob.size > 1024 * 1024) {
+    throw new Error('Fichier supérieur à 1 Mo refusé. Veuillez sélectionner une photo de moins de 1 Mo.');
+  }
+
   const sb = getSupabaseClient();
-  const ext = folder === 'audio' ? 'webm' : 'jpg';
-  const name = filename || `${folder}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${ext}`;
+  const isImage = folder === 'images' || fileOrBlob.type.startsWith('image/');
+  const ext = isImage ? 'webp' : 'webm';
+  const name =
+    filename ||
+    `${folder}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${ext}`;
   const filePath = `${folder}/${name}`;
+  const mimeType = isImage
+    ? 'image/webp'
+    : fileOrBlob.type || 'audio/webm';
+
+  // Buckets cibles autorisés : priorité 'garde-photo', puis 'garde-ordonnances', puis 'chat-media'
+  const targetBuckets = ['garde-photo', 'garde-ordonnances', 'chat-media'];
 
   try {
     if (sb) {
-      const { data, error } = await sb.storage
-        .from('chat-media')
-        .upload(filePath, fileOrBlob, {
-          cacheControl: '3600',
-          upsert: true,
-          contentType: fileOrBlob.type || (folder === 'audio' ? 'audio/webm' : 'image/jpeg')
-        });
+      for (const bucket of targetBuckets) {
+        try {
+          const { data, error } = await sb.storage
+            .from(bucket)
+            .upload(filePath, fileOrBlob, {
+              cacheControl: '3600',
+              upsert: true,
+              contentType: mimeType,
+            });
 
-      if (!error && data) {
-        const { data: publicUrlData } = sb.storage.from('chat-media').getPublicUrl(filePath);
-        if (publicUrlData?.publicUrl) {
-          return publicUrlData.publicUrl;
+          if (!error && data) {
+            const { data: publicUrlData } = sb.storage
+              .from(bucket)
+              .getPublicUrl(filePath);
+            if (publicUrlData?.publicUrl) {
+              return publicUrlData.publicUrl;
+            }
+          }
+        } catch {
+          // essayer le bucket suivant
         }
       }
     }

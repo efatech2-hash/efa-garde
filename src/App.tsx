@@ -129,7 +129,7 @@ export default function App() {
       ? 'pharma_active'
       : 'client';
 
-  // Auto-nettoyage des messages de plus de 48h
+  // Auto-nettoyage des messages et photos de plus de 24h (cycle auto-delete 24h)
   useEffect(() => {
     cleanExpiredMessages();
     const interval = setInterval(() => {

@@ -10,6 +10,7 @@ import {
   uploadMediaToSupabase,
   isMessageExpired,
 } from '../services/store';
+import { compressChatImage } from '../utils/imageCompressor';
 import { playNotificationSound } from '../services/sound';
 import {
   MessageSquare,
@@ -261,13 +262,29 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   };
 
   // Photo handlers
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
-    const previewUrl = URL.createObjectURL(file);
-    setPendingPhoto({ file, previewUrl, caption: '' });
-    e.target.value = '';
+
+    // 1. Refus strict si > 1 Mo
+    if (file.size > 1024 * 1024) {
+      alert('Fichier supérieur à 1 Mo refusé. Veuillez sélectionner une photo de moins de 1 Mo.');
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      // 2. Compression auto côté client à max 500 Ko / 1024px au format WebP
+      const processedFile = await compressChatImage(file);
+      const previewUrl = URL.createObjectURL(processedFile);
+      setPendingPhoto({ file: processedFile, previewUrl, caption: '' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur compression photo';
+      alert(msg);
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleSendPhoto = async () => {
@@ -404,7 +421,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
               </span>
             </div>
             <p className="text-[11px] sm:text-xs text-slate-400 truncate max-w-[60vw] sm:max-w-none">
-              Discussions directes avec les patients de Lomé • Alertes sonores • Auto-clean 48h
+              Discussions directes avec les patients de Lomé • Alertes sonores • Auto-clean 24h
             </p>
           </div>
         </div>
@@ -753,13 +770,21 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
       {pendingPhoto && (
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex flex-col justify-between p-4">
           <div className="flex items-center justify-between text-white">
-            <span className="text-sm font-bold">Aperçu photo avant envoi</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-bold">Aperçu photo</span>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                {(pendingPhoto.file.size / 1024).toFixed(0)} Ko • WebP
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Auto-delete 24h
+              </span>
+            </div>
             <button
               onClick={() => {
                 URL.revokeObjectURL(pendingPhoto.previewUrl);
                 setPendingPhoto(null);
               }}
-              className="p-2 text-white"
+              className="p-2 text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
             >
               <X className="w-6 h-6" />
             </button>
