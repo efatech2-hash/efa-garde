@@ -243,6 +243,84 @@ export function updatePharmacySuperAdmin(
   return list[idx];
 }
 
+export interface SubscriptionActivationOptions {
+  planType: 'basic_90k' | 'premium_140k' | 'premium_15k';
+  durationDays?: number;
+}
+
+/**
+ * Active l'abonnement en Base de Données Supabase (Source unique de vérité)
+ * Puis synchronise le cache local et notifie tous les écouteurs en temps réel.
+ */
+export async function activateSubscriptionInDB(
+  pharmacyId: string,
+  options: SubscriptionActivationOptions
+): Promise<Pharmacie | null> {
+  const { planType } = options;
+  const now = new Date();
+  const isPremium = planType === 'premium_140k' || planType === 'premium_15k';
+  const durationDays = options.durationDays || (planType === 'premium_15k' ? 30 : 365);
+  const end = new Date(now.getTime() + durationDays * 86400000);
+
+  const updates: Partial<Pharmacie> = {
+    subscription_plan: isPremium ? 'premium' : 'basic',
+    subscription_status: 'active',
+    subscription_start_at: now.toISOString(),
+    subscription_end_at: end.toISOString(),
+    subscription_end: end.toISOString(),
+    subscription_days_left: durationDays,
+    is_active: true,
+    is_premium: isPremium,
+    etoile_doree: isPremium,
+    position: isPremium ? 0 : 1,
+    is_always_visible: isPremium,
+    badge: isPremium ? 'POPULAIRE' : undefined,
+    plan: planType === 'premium_140k' ? 'populaire_annuel' : planType === 'premium_15k' ? 'populaire_mensuel' : 'annual',
+    prix: planType === 'premium_140k' ? 140000 : planType === 'premium_15k' ? 15000 : 90000,
+    statut: 'approved',
+  };
+
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { error } = await client
+        .from('pharmacies')
+        .update(updates)
+        .eq('id', pharmacyId);
+      if (error) {
+        console.warn('[EFA GARDE] Error updating pharmacy subscription in DB:', error);
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] Failed to update DB:', err);
+  }
+
+  const updated = updatePharmacySuperAdmin(pharmacyId, updates);
+  notifyChange();
+  return updated;
+}
+
+export async function fetchPharmacyById(id: string): Promise<Pharmacie | null> {
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data, error } = await client
+        .from('pharmacies')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (!error && data) {
+        updatePharmacySuperAdmin(id, data as Pharmacie);
+        return data as Pharmacie;
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchPharmacyById fallback:', err);
+  }
+  const list = loadPharmacies();
+  return list.find((p) => p.id === id) || null;
+}
+
 export function loadGardes(pharmacieId?: string): Garde[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_GARDES);

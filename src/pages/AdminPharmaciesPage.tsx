@@ -5,8 +5,10 @@ import {
   rejectPendingPharmacy,
   addPendingPharmacy,
   loadPharmacies,
+  fetchPharmacies,
 } from '../services/store';
-import { PharmaciePending } from '../types';
+import { PharmaciePending, Pharmacie } from '../types';
+import { ActivateSubscriptionModal } from '../components/ActivateSubscriptionModal';
 import { Logo } from '../components/Logo';
 import {
   ShieldCheck,
@@ -23,6 +25,7 @@ import {
   RefreshCw,
   Eye,
   Check,
+  Star,
 } from 'lucide-react';
 
 interface AdminPharmaciesPageProps {
@@ -38,11 +41,18 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
     loadPendingPharmacies()
   );
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'all'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'abonnements' | 'all'>('pending');
+  const [allPharmacies, setAllPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
+  const [selectedPharmaToActivate, setSelectedPharmaToActivate] = useState<Pharmacie | null>(null);
+  const [isActivateModalOpen, setIsActivateModalOpen] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   const refreshList = () => {
     setPendingList(loadPendingPharmacies());
+    setAllPharmacies(loadPharmacies());
+    fetchPharmacies().then((data) => {
+      if (data && data.length > 0) setAllPharmacies(data);
+    }).catch(() => {});
     onRefresh();
   };
 
@@ -153,7 +163,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
 
         {/* Tab switcher */}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap gap-2">
             <button
               onClick={() => setActiveTab('pending')}
               className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
@@ -163,7 +173,19 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
               }`}
             >
               <Clock className="w-4 h-4" />
-              <span>En attente de vérification ({pendingCount})</span>
+              <span>En attente ({pendingCount})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('abonnements')}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                activeTab === 'abonnements'
+                  ? 'bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/20'
+                  : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Abonnements & Plans ({allPharmacies.length})</span>
             </button>
 
             <button
@@ -174,7 +196,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
                   : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'
               }`}
             >
-              Historique complet ({pendingList.length})
+              Historique ({pendingList.length})
             </button>
           </div>
 
@@ -188,8 +210,132 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
           )}
         </div>
 
-        {/* Empty state */}
-        {filteredList.length === 0 ? (
+        {/* VIEW 1 : ONGLET ABONNEMENTS & OFFRES */}
+        {activeTab === 'abonnements' ? (
+          <div className="space-y-4">
+            <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl flex items-center justify-between text-xs">
+              <span className="text-slate-300 font-bold">
+                Gestion des Abonnements ({allPharmacies.length} officines de Lomé)
+              </span>
+              <span className="text-amber-400 font-mono">
+                Source unique : DB Supabase (Temps réel)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {allPharmacies.map((pharma) => {
+                const isPop =
+                  pharma.subscription_plan === 'premium' ||
+                  pharma.plan === 'populaire_mensuel' ||
+                  pharma.plan === 'populaire_annuel' ||
+                  Boolean(pharma.etoile_doree);
+
+                const rawEnd = pharma.subscription_end_at || pharma.subscription_end;
+                const daysLeft = rawEnd
+                  ? Math.ceil((new Date(rawEnd).getTime() - Date.now()) / 86400000)
+                  : null;
+
+                return (
+                  <div
+                    key={pharma.id}
+                    className={`bg-slate-900 border rounded-3xl p-5 shadow-xl transition-all space-y-4 ${
+                      isPop
+                        ? 'border-yellow-500/40 bg-gradient-to-br from-slate-900 to-amber-950/20'
+                        : 'border-slate-800'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isPop ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-yellow-500 text-slate-950 flex items-center gap-1 shadow-xs">
+                              <Star className="w-3 h-3 fill-slate-950" />
+                              POPULAIRE GOLD
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                              STANDARD
+                            </span>
+                          )}
+
+                          {pharma.is_active !== false ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                              ● Actif
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
+                              ○ Inactif
+                            </span>
+                          )}
+
+                          <span className="text-[11px] font-mono text-slate-400">
+                            ID: {pharma.id}
+                          </span>
+                        </div>
+
+                        <h3 className="text-lg font-black text-white mt-1.5 flex items-center gap-2">
+                          <Building className="w-5 h-5 text-emerald-400" />
+                          <span>{pharma.nom}</span>
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          {pharma.adresse} {pharma.quartier ? `(${pharma.quartier})` : ''} • {pharma.tel}
+                        </p>
+                      </div>
+
+                      {/* Bouton Activer / Gérer Abonnement */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPharmaToActivate(pharma);
+                          setIsActivateModalOpen(true);
+                        }}
+                        className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
+                      >
+                        <Sparkles className="w-4 h-4 fill-slate-950" />
+                        <span>⚡ Activer / Modifier Abonnement</span>
+                      </button>
+                    </div>
+
+                    {/* Données d'expiration & jours restants */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800">
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">Plan actuel :</span>
+                        <span className="font-bold text-white uppercase">
+                          {pharma.plan || 'Base'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">Fin d'abonnement :</span>
+                        <span className="font-mono font-bold text-slate-200">
+                          {rawEnd ? new Date(rawEnd).toLocaleDateString('fr-FR') : 'Non défini'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">Jours restants :</span>
+                        {daysLeft !== null ? (
+                          <span
+                            className={`font-black ${
+                              daysLeft <= 0
+                                ? 'text-red-400'
+                                : daysLeft < 7
+                                ? 'text-amber-400 animate-pulse'
+                                : 'text-emerald-400'
+                            }`}
+                          >
+                            {daysLeft > 0 ? `${daysLeft} jours` : 'Expiré (0j)'}
+                          </span>
+                        ) : (
+                          <span className="italic text-slate-500">Non défini</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : filteredList.length === 0 ? (
+          /* Empty state */
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-3">
             <div className="w-14 h-14 rounded-2xl bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
               <CheckCircle2 className="w-7 h-7 text-emerald-400" />
@@ -261,28 +407,55 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
                       </h2>
                     </div>
 
-                    {/* Action buttons (Approver / Refuser) */}
-                    {isPending && (
-                      <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
-                        <button
-                          onClick={() => handleReject(p.id, p.nom)}
-                          disabled={processingId === p.id}
-                          className="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/40 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
-                        >
-                          <XCircle className="w-4 h-4 text-red-400" />
-                          <span>❌ Refuser</span>
-                        </button>
+                    {/* Action buttons (Approver / Refuser / Activer Abonnement) */}
+                    <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto shrink-0">
+                      {isPending && (
+                        <>
+                          <button
+                            onClick={() => handleReject(p.id, p.nom)}
+                            disabled={processingId === p.id}
+                            className="px-3.5 py-2.5 rounded-2xl bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/40 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                          >
+                            <XCircle className="w-4 h-4 text-red-400" />
+                            <span>Refuser</span>
+                          </button>
 
-                        <button
-                          onClick={() => handleApprove(p.id, p.nom)}
-                          disabled={processingId === p.id}
-                          className="flex-1 sm:flex-none px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
-                        >
-                          <Check className="w-4 h-4" />
-                          <span>✅ APPROUVER (Carte en vert)</span>
-                        </button>
-                      </div>
-                    )}
+                          <button
+                            onClick={() => handleApprove(p.id, p.nom)}
+                            disabled={processingId === p.id}
+                            className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>Approuver</span>
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const matchingPharma = allPharmacies.find((ph) => ph.id === p.id) || {
+                            id: p.id,
+                            nom: p.nom,
+                            tel: p.phone,
+                            lat: p.lat,
+                            lng: p.lng,
+                            adresse: p.adresse,
+                            plan: 'populaire_mensuel',
+                            is_online: true,
+                            titulaire: p.titulaire,
+                            quartier: p.quartier,
+                            email_pro: p.email_pro,
+                          };
+                          setSelectedPharmaToActivate(matchingPharma);
+                          setIsActivateModalOpen(true);
+                        }}
+                        className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs shadow-md shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                      >
+                        <Sparkles className="w-4 h-4 fill-slate-950" />
+                        <span>⚡ Activer Abonnement</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Details grid */}
@@ -353,7 +526,23 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
             })}
           </div>
         )}
+
+        {/* Modal d'activation abonnement direct en DB */}
+        <ActivateSubscriptionModal
+          isOpen={isActivateModalOpen}
+          pharmacie={selectedPharmaToActivate}
+          onClose={() => {
+            setIsActivateModalOpen(false);
+            setSelectedPharmaToActivate(null);
+          }}
+          onSuccess={(updated) => {
+            refreshList();
+            setActionNotice(`⚡ Abonnement "${updated.nom}" activé avec succès en DB ! Compte à rebours synchronisé en direct.`);
+            setTimeout(() => setActionNotice(null), 5000);
+          }}
+        />
       </div>
     </div>
   );
 };
+export default AdminPharmaciesPage;

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Pharmacie, PlanType } from '../types';
 import { updatePharmacyPlan } from '../services/store';
 import { supabase } from '../lib/supabase';
+import { SubscriptionCountdown } from '../components/SubscriptionCountdown';
 import {
   Star,
   Check,
@@ -73,6 +74,16 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
           </span>
         </div>
       </div>
+
+      {/* COMPTE À REBOURS ACTUEL SYNCHRONISÉ AVEC LE SUPER ADMIN */}
+      {currentPharma && (
+        <div className="max-w-xl mx-auto">
+          <SubscriptionCountdown
+            pharmacie={currentPharma}
+            onUpdate={onRefresh}
+          />
+        </div>
+      )}
 
       {/* 4 PRICING CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">

@@ -7,6 +7,9 @@ export type PlanType =
   | 'populaire_mensuel'
   | 'populaire_annuel';
 
+export type SubscriptionPlan = 'basic' | 'premium';
+export type SubscriptionStatus = 'active' | 'inactive';
+
 export interface Pharmacie {
   id: string;
   nom: string;
@@ -18,6 +21,11 @@ export interface Pharmacie {
   is_online: boolean;
   is_active?: boolean;
   is_registered?: boolean;
+  subscription_plan?: SubscriptionPlan;
+  subscription_status?: SubscriptionStatus;
+  subscription_start_at?: string;
+  subscription_end_at?: string;
+  subscription_days_left?: number;
   subscription_end?: string;
   is_premium?: boolean;
   etoile_doree?: boolean;

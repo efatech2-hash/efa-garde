@@ -7,9 +7,11 @@ import {
   subscribeToStore,
   getSupabaseClient,
   fetchPharmacies,
+  activateSubscriptionInDB,
 } from '../services/store';
 import { getSession, setSession, clearSession } from '../lib/auth';
 import { Logo } from '../components/Logo';
+import { ActivateSubscriptionModal } from '../components/ActivateSubscriptionModal';
 import {
   ShieldCheck,
   Search,
@@ -73,6 +75,8 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [selectedPharmaForModal, setSelectedPharmaForModal] = useState<Pharmacie | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Listen to store updates
   useEffect(() => {
@@ -120,96 +124,29 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   };
 
   // 1. Action: BOUTON POPULAIRE MENSUEL (15.000F) : couleur GOLD bg-yellow-500
-  // Au clic : is_active=true, is_premium=true, etoile_doree=true, position=0, plan='populaire_mensuel', subscription_end = now + 30 jours, prix=15000
+  // Au clic : subscription_plan='premium', subscription_status='active', subscription_start_at=NOW(), subscription_end_at=NOW() + 30 days
   const handleActivatePopulaireMensuel = async (p: Pharmacie) => {
-    const now = new Date();
-    const end = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
-    const updates: Partial<Pharmacie> = {
-      is_active: true,
-      is_premium: true,
-      etoile_doree: true,
-      position: 0,
-      is_always_visible: true,
-      plan: 'populaire_mensuel',
-      subscription_end: end.toISOString(),
-      prix: 15000,
-      badge: 'POPULAIRE',
-      statut: 'approved',
-    };
-
-    try {
-      const client = getSupabaseClient();
-      if (client) {
-        await client.from('pharmacies').update(updates).eq('id', p.id);
-      }
-    } catch (err) {
-      console.warn('Supabase update warning:', err);
-    }
-
-    updatePharmacySuperAdmin(p.id, updates);
+    await activateSubscriptionInDB(p.id, { planType: 'premium_15k' });
     await fetchPharmacies();
     setPharmacies(loadPharmacies());
-    showToast(`⭐ "${p.nom}" activée en POPULAIRE MENSUEL (15.000F) pour 30 jours !`);
+    showToast(`⭐ "${p.nom}" activée en POPULAIRE MENSUEL (15.000F) pour 30 jours en DB !`);
   };
 
   // 2. Action: BOUTON POPULAIRE ANNUEL (140.000F) : couleur GOLD dégradé bg-gradient-to-r from-yellow-400 to-yellow-600
-  // Au clic : is_active=true, is_premium=true, etoile_doree=true, position=0, plan='populaire_annuel', subscription_end = now + 365 jours, prix=140000
+  // Au clic : subscription_plan='premium', subscription_status='active', subscription_start_at=NOW(), subscription_end_at=NOW() + 365 days
   const handleActivatePopulaireAnnuel = async (p: Pharmacie) => {
-    const now = new Date();
-    const end = new Date(now.getTime() + 365 * 24 * 3600 * 1000);
-    const updates: Partial<Pharmacie> = {
-      is_active: true,
-      is_premium: true,
-      etoile_doree: true,
-      position: 0,
-      is_always_visible: true,
-      plan: 'populaire_annuel',
-      subscription_end: end.toISOString(),
-      prix: 140000,
-      badge: 'POPULAIRE',
-      statut: 'approved',
-    };
-
-    try {
-      const client = getSupabaseClient();
-      if (client) {
-        await client.from('pharmacies').update(updates).eq('id', p.id);
-      }
-    } catch (err) {
-      console.warn('Supabase update warning:', err);
-    }
-
-    updatePharmacySuperAdmin(p.id, updates);
+    await activateSubscriptionInDB(p.id, { planType: 'premium_140k' });
     await fetchPharmacies();
     setPharmacies(loadPharmacies());
-    showToast(`👑 "${p.nom}" activée en POPULAIRE ANNUEL (140.000F) pour 1 an !`);
+    showToast(`👑 "${p.nom}" activée en POPULAIRE ANNUEL (140.000F) pour 1 an en DB !`);
   };
 
-  // 3. Action: Activer 1 an (90.000F) => is_active=true, subscription_end = now + 365j
+  // 3. Action: Activer 1 an (90.000F) => subscription_plan='basic', subscription_status='active', subscription_end_at = now + 365j
   const handleActivate1Year = async (p: Pharmacie) => {
-    const now = new Date();
-    const oneYearLater = new Date(now.getTime() + 365 * 24 * 3600 * 1000);
-    const updates: Partial<Pharmacie> = {
-      is_active: true,
-      subscription_end: oneYearLater.toISOString(),
-      plan: 'annual',
-      statut: 'approved',
-      prix: 90000,
-    };
-
-    try {
-      const client = getSupabaseClient();
-      if (client) {
-        await client.from('pharmacies').update(updates).eq('id', p.id);
-      }
-    } catch (err) {
-      console.warn('Supabase update warning:', err);
-    }
-
-    updatePharmacySuperAdmin(p.id, updates);
+    await activateSubscriptionInDB(p.id, { planType: 'basic_90k' });
     await fetchPharmacies();
     setPharmacies(loadPharmacies());
-    showToast(`✅ "${p.nom}" activée pour 1 an (90.000F) jusqu'au ${oneYearLater.toLocaleDateString('fr-FR')} !`);
+    showToast(`💼 "${p.nom}" activée pour 1 an STANDARD (90.000F) en DB !`);
   };
 
   // 4. Action: Activer enregistrement (25.000F) => is_registered=true, is_active=true
@@ -280,12 +217,17 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
 
   // 7. Action: Prolonger (+30 jours)
   const handleExtend = async (p: Pharmacie) => {
-    const currentEnd = p.subscription_end ? new Date(p.subscription_end) : new Date();
+    const rawEnd = p.subscription_end_at || p.subscription_end;
+    const currentEnd = rawEnd ? new Date(rawEnd) : new Date();
     const baseTime = currentEnd.getTime() > Date.now() ? currentEnd.getTime() : Date.now();
     const newEnd = new Date(baseTime + 30 * 24 * 3600 * 1000);
+    const daysLeft = Math.ceil((newEnd.getTime() - Date.now()) / 86400000);
     const updates: Partial<Pharmacie> = {
       is_active: true,
+      subscription_status: 'active',
+      subscription_end_at: newEnd.toISOString(),
       subscription_end: newEnd.toISOString(),
+      subscription_days_left: daysLeft,
     };
 
     try {
@@ -329,10 +271,11 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
 
   // Helper formatting subscription end date
   const formatSubscriptionEnd = (p: Pharmacie) => {
-    if (!p.subscription_end) {
+    const rawEnd = p.subscription_end_at || p.subscription_end;
+    if (!rawEnd) {
       return <span className="text-slate-500 italic text-xs">Non défini</span>;
     }
-    const end = new Date(p.subscription_end);
+    const end = new Date(rawEnd);
     const isExpired = end.getTime() < Date.now();
     const daysLeft = Math.ceil((end.getTime() - Date.now()) / (24 * 3600 * 1000));
 
@@ -742,6 +685,20 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                         {/* Actions */}
                         <td className="py-4 px-4 sm:px-6 text-right">
                           <div className="flex items-center justify-end flex-wrap gap-1.5">
+                            {/* BOUTON MODAL CHOIX PLAN + DURÉE */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPharmaForModal(p);
+                                setIsModalOpen(true);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-[11px] shadow-sm transition-all cursor-pointer active:scale-95 flex items-center gap-1"
+                              title="Ouvrir le modal de sélection plan + durée DB"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                              <span>⚡ Choix plan (Modal)</span>
+                            </button>
+
                             {/* BOUTON POPULAIRE MENSUEL (15.000F) : couleur GOLD bg-yellow-500 */}
                             <button
                               type="button"
@@ -823,6 +780,21 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
           )}
         </div>
       </main>
+
+      {/* Modal d'activation abonnement direct en DB */}
+      <ActivateSubscriptionModal
+        isOpen={isModalOpen}
+        pharmacie={selectedPharmaForModal}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedPharmaForModal(null);
+        }}
+        onSuccess={async (updated) => {
+          await fetchPharmacies();
+          setPharmacies(loadPharmacies());
+          showToast(`⚡ Abonnement de "${updated.nom}" activé avec succès en DB ! Compte à rebours synchronisé.`);
+        }}
+      />
     </div>
   );
 };

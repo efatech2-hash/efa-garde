@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Pharmacie } from '../types';
-import { loadPharmacies } from '../services/store';
+import { loadPharmacies, updatePharmacySuperAdmin } from '../services/store';
 import { setSession } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import { Logo } from '../components/Logo';
@@ -112,8 +112,24 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
       if (!signInError && signInData?.session) {
         const assignedPharmaId =
           signInData.user?.user_metadata?.pharmacy_id || matchedPharma?.id || 'pharma-1';
-        const assignedPharma =
+        let assignedPharma =
           pharmacies.find((p) => p.id === assignedPharmaId) || matchedPharma;
+
+        // Fetch subscription_end_at depuis DB au login
+        try {
+          const { data: dbPharma } = await supabase
+            .from('pharmacies')
+            .select('*')
+            .eq('id', assignedPharma.id)
+            .maybeSingle();
+
+          if (dbPharma) {
+            assignedPharma = { ...assignedPharma, ...(dbPharma as Pharmacie) };
+            updatePharmacySuperAdmin(dbPharma.id, dbPharma as Pharmacie);
+          }
+        } catch (dbErr) {
+          console.warn('DB fetch at login fallback:', dbErr);
+        }
 
         localStorage.setItem('role', 'pharma');
         localStorage.setItem('efa_garde_role', 'pharma');
@@ -184,7 +200,22 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
     }
   };
 
-  const handleInstantConfirmDemo = () => {
+  const handleInstantConfirmDemo = async () => {
+    // Fetch subscription_end_at depuis DB au login
+    try {
+      const { data: dbPharma } = await supabase
+        .from('pharmacies')
+        .select('*')
+        .eq('id', selectedPharma.id)
+        .maybeSingle();
+
+      if (dbPharma) {
+        updatePharmacySuperAdmin(dbPharma.id, dbPharma as Pharmacie);
+      }
+    } catch (dbErr) {
+      console.warn('DB fetch at login fallback:', dbErr);
+    }
+
     localStorage.setItem('role', 'pharma');
     localStorage.setItem('efa_garde_role', 'pharma');
     localStorage.setItem('pharma_id', selectedPharma.id);

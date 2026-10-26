@@ -101,6 +101,21 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 2b. Désactivation auto des abonnements échus dont subscription_end_at < NOW()
+    try {
+      await supabase
+        .from('pharmacies')
+        .update({
+          subscription_status: 'inactive',
+          is_active: false,
+          subscription_days_left: 0,
+        })
+        .eq('subscription_status', 'active')
+        .lt('subscription_end_at', new Date().toISOString())
+    } catch {
+      // ignore
+    }
+
     // 3. Exécution RPC si la fonction SQL dédiée est créée dans la base
     try {
       await supabase.rpc('cleanup_garde_24h')
