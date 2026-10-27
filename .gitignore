@@ -11,4 +11,8 @@ coverage/
 !.env.example
 *.pem
 *.key
+bun.lock
+bun.lockb
+pnpm-lock.yaml
+yarn.lock
 
