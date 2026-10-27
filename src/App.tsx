@@ -122,6 +122,16 @@ export default function App() {
     session?.role === 'pharma_active' ||
     session?.role === 'pharma_pending';
 
+  const superAdminEnvEmail = (
+    import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'efatech2@gmail.com'
+  )
+    .trim()
+    .toLowerCase();
+
+  const isSuperAdminUser =
+    localStorage.getItem('is_super_admin') === 'true' &&
+    session?.email?.trim().toLowerCase() === superAdminEnvEmail;
+
   const userRole: 'client' | 'pharma' | 'pharma_active' | 'pharma_pending' =
     session?.role === 'pharma_pending'
       ? 'pharma_pending'
@@ -189,15 +199,24 @@ export default function App() {
     };
   }, [currentPath]);
 
-  // 3. SECURITE : Route /ajouter-pharmacie & /pro : bloque si role != pharmacien valide (redirect /home)
+  // 3. SECURITE : Routes pharmacien protégées : redirige vers /pharma/login si rôle invalide ou non connecté
   useEffect(() => {
-    const isRestrictedRoute =
+    const isPharmaRestrictedRoute =
       currentPath === '/ajouter-pharmacie' ||
       currentPath === '/pro' ||
-      currentPath === '/dashboard';
+      currentPath === '/dashboard' ||
+      currentPath === '/pharma/dashboard' ||
+      currentPath === '/dashboard-pharma' ||
+      currentPath === '/inbox' ||
+      currentPath === '/abonnement' ||
+      currentPath === '/qr' ||
+      currentPath === '/profil' ||
+      currentPath === '/pharma/stats' ||
+      currentPath === '/stats' ||
+      currentPath === '/statistiques';
 
-    if (isRestrictedRoute && !isPharmaUser) {
-      navigateTo('/home');
+    if (isPharmaRestrictedRoute && !isPharmaUser) {
+      navigateTo('/pharma/login');
     }
   }, [currentPath, isPharmaUser]);
 
@@ -212,10 +231,13 @@ export default function App() {
     }
   }, [currentPath]);
 
-  // SECURITE : /super-admin accessible UNIQUEMENT au super admin (si autre user connecté -> redirect /login)
+  // SECURITE : /super-admin & /admin accessible UNIQUEMENT au super admin (redirection vers /login si non autorisé)
   useEffect(() => {
     const isSuperRoute =
-      currentPath === '/super-admin' || currentPath === '/superadmin';
+      currentPath === '/super-admin' ||
+      currentPath === '/superadmin' ||
+      currentPath === '/admin' ||
+      currentPath === '/admin/pharmacies';
 
     if (isSuperRoute) {
       const activeSess = getSession();
@@ -230,7 +252,7 @@ export default function App() {
         activeSess?.email &&
         activeSess.email.trim().toLowerCase() === superAdminEnvEmail;
 
-      if (activeSess && !isSuper) {
+      if (!isSuper) {
         navigateTo('/login');
       }
     }
@@ -530,12 +552,25 @@ export default function App() {
       );
     }
   } else if (currentPath === '/admin' || currentPath === '/admin/pharmacies') {
-    content = (
-      <AdminPharmaciesPage
-        onBackToMap={() => navigateTo('/home')}
-        onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
-      />
-    );
+    if (isSuperAdminUser) {
+      content = (
+        <AdminPharmaciesPage
+          onBackToMap={() => navigateTo('/home')}
+          onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
+        />
+      );
+    } else {
+      setTimeout(() => navigateTo('/login'), 0);
+      content = (
+        <PharmacienLoginPage
+          onSuccess={handleAuthPharmaSuccess}
+          onBackToMap={() => navigateTo('/home')}
+          onNavigateToRegister={() =>
+            navigateTo('/paiement-inscription?plan=enregistrement_lome')
+          }
+        />
+      );
+    }
   } else if (
     currentPath === '/pharma/login' ||
     currentPath === '/login' ||
@@ -554,15 +589,28 @@ export default function App() {
     currentPath === '/pharma/dashboard' ||
     currentPath === '/dashboard-pharma'
   ) {
-    content = (
-      <DashboardPharma
-        onNavigate={(tab) => {
-          const clean = tab.startsWith('/') ? tab : `/${tab}`;
-          navigateTo(clean === '/dashboard' ? '/pharma/dashboard' : clean);
-        }}
-        onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
-      />
-    );
+    if (isPharmaUser) {
+      content = (
+        <DashboardPharma
+          onNavigate={(tab) => {
+            const clean = tab.startsWith('/') ? tab : `/${tab}`;
+            navigateTo(clean === '/dashboard' ? '/pharma/dashboard' : clean);
+          }}
+          onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
+        />
+      );
+    } else {
+      setTimeout(() => navigateTo('/pharma/login'), 0);
+      content = (
+        <PharmacienLoginPage
+          onSuccess={handleAuthPharmaSuccess}
+          onBackToMap={() => navigateTo('/home')}
+          onNavigateToRegister={() =>
+            navigateTo('/paiement-inscription?plan=enregistrement_lome')
+          }
+        />
+      );
+    }
   } else if (
     currentPath === '/pub' ||
     currentPath === '/app-mobile' ||
@@ -578,53 +626,118 @@ export default function App() {
       />
     );
   } else if (currentPath === '/inbox') {
-    content = (
-      <PharmaInboxPage
-        pharmacies={pharmacies}
-        activePharmaId={activePharmaId}
-        onSelectActivePharma={handleSelectActivePharma}
-      />
-    );
+    if (isPharmaUser) {
+      content = (
+        <PharmaInboxPage
+          pharmacies={pharmacies}
+          activePharmaId={activePharmaId}
+          onSelectActivePharma={handleSelectActivePharma}
+        />
+      );
+    } else {
+      setTimeout(() => navigateTo('/pharma/login'), 0);
+      content = (
+        <PharmacienLoginPage
+          onSuccess={handleAuthPharmaSuccess}
+          onBackToMap={() => navigateTo('/home')}
+          onNavigateToRegister={() =>
+            navigateTo('/paiement-inscription?plan=enregistrement_lome')
+          }
+        />
+      );
+    }
   } else if (currentPath === '/abonnement') {
-    content = (
-      <SubscriptionPage
-        pharmacies={pharmacies}
-        activePharmaId={activePharmaId}
-        onSelectActivePharma={handleSelectActivePharma}
-        onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
-      />
-    );
+    if (isPharmaUser) {
+      content = (
+        <SubscriptionPage
+          pharmacies={pharmacies}
+          activePharmaId={activePharmaId}
+          onSelectActivePharma={handleSelectActivePharma}
+          onRefresh={() => setPharmacies(loadAllPharmaciesWithPending())}
+        />
+      );
+    } else {
+      setTimeout(() => navigateTo('/pharma/login'), 0);
+      content = (
+        <PharmacienLoginPage
+          onSuccess={handleAuthPharmaSuccess}
+          onBackToMap={() => navigateTo('/home')}
+          onNavigateToRegister={() =>
+            navigateTo('/paiement-inscription?plan=enregistrement_lome')
+          }
+        />
+      );
+    }
   } else if (
     currentPath === '/pharma/stats' ||
     currentPath === '/stats' ||
     currentPath === '/statistiques'
   ) {
-    content = (
-      <PharmaStatsPage
-        pharmacies={pharmacies}
-        activePharmaId={activePharmaId}
-        onSelectActivePharma={handleSelectActivePharma}
-        onNavigate={navigateTo}
-      />
-    );
+    if (isPharmaUser) {
+      content = (
+        <PharmaStatsPage
+          pharmacies={pharmacies}
+          activePharmaId={activePharmaId}
+          onSelectActivePharma={handleSelectActivePharma}
+          onNavigate={navigateTo}
+        />
+      );
+    } else {
+      setTimeout(() => navigateTo('/pharma/login'), 0);
+      content = (
+        <PharmacienLoginPage
+          onSuccess={handleAuthPharmaSuccess}
+          onBackToMap={() => navigateTo('/home')}
+          onNavigateToRegister={() =>
+            navigateTo('/paiement-inscription?plan=enregistrement_lome')
+          }
+        />
+      );
+    }
   } else if (currentPath === '/qr') {
-    content = (
-      <QrPage
-        pharmacies={pharmacies}
-        activePharmaId={activePharmaId}
-        onSelectActivePharma={handleSelectActivePharma}
-        onNavigate={(tab) => navigateTo(`/${tab}`)}
-      />
-    );
+    if (isPharmaUser) {
+      content = (
+        <QrPage
+          pharmacies={pharmacies}
+          activePharmaId={activePharmaId}
+          onSelectActivePharma={handleSelectActivePharma}
+          onNavigate={(tab) => navigateTo(`/${tab}`)}
+        />
+      );
+    } else {
+      setTimeout(() => navigateTo('/pharma/login'), 0);
+      content = (
+        <PharmacienLoginPage
+          onSuccess={handleAuthPharmaSuccess}
+          onBackToMap={() => navigateTo('/home')}
+          onNavigateToRegister={() =>
+            navigateTo('/paiement-inscription?plan=enregistrement_lome')
+          }
+        />
+      );
+    }
   } else if (currentPath === '/profil') {
-    content = (
-      <ProfilePage
-        pharmacies={pharmacies}
-        activePharmaId={activePharmaId}
-        onNavigate={navigateTo}
-        onLogout={handleLogout}
-      />
-    );
+    if (isPharmaUser) {
+      content = (
+        <ProfilePage
+          pharmacies={pharmacies}
+          activePharmaId={activePharmaId}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      );
+    } else {
+      setTimeout(() => navigateTo('/pharma/login'), 0);
+      content = (
+        <PharmacienLoginPage
+          onSuccess={handleAuthPharmaSuccess}
+          onBackToMap={() => navigateTo('/home')}
+          onNavigateToRegister={() =>
+            navigateTo('/paiement-inscription?plan=enregistrement_lome')
+          }
+        />
+      );
+    }
   } else {
     content = (
       <Map

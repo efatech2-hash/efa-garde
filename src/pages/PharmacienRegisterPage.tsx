@@ -8,6 +8,12 @@ import {
   RegistrationPaymentToken,
 } from '../lib/paymentTokens';
 import {
+  validateUploadedFile,
+  sanitizeInput,
+  validateCoordinates,
+  validatePhone,
+} from '../utils/security';
+import {
   ShieldCheck,
   Building,
   User,
@@ -89,6 +95,11 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
   ) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateUploadedFile(file, 2 * 1024 * 1024);
+      if (!validation.isValid) {
+        setErrorMsg(validation.error || 'Fichier non valide.');
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setter(reader.result as string);
@@ -159,8 +170,15 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
       return;
     }
 
-    if (lat === '' || lng === '' || isNaN(Number(lat)) || isNaN(Number(lng))) {
-      setErrorMsg('Les coordonnées Latitude et Longitude sont obligatoires.');
+    const numLat = Number(lat);
+    const numLng = Number(lng);
+    if (lat === '' || lng === '' || isNaN(numLat) || isNaN(numLng) || !validateCoordinates(numLat, numLng)) {
+      setErrorMsg('Les coordonnées Latitude et Longitude sont obligatoires et doivent être valides.');
+      return;
+    }
+
+    if (!validatePhone(phone.trim())) {
+      setErrorMsg('Numéro de téléphone invalide (au moins 8 chiffres requis).');
       return;
     }
 
@@ -168,18 +186,18 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
 
     try {
       await addPendingPharmacy({
-        nom: nomPharmacie.trim(),
-        quartier,
-        adresse: adresse.trim(),
-        phone: phone.trim(),
-        titulaire: titulaire.trim(),
-        numero_ordre: numeroOrdre.trim().toUpperCase(),
+        nom: sanitizeInput(nomPharmacie),
+        quartier: sanitizeInput(quartier),
+        adresse: sanitizeInput(adresse),
+        phone: sanitizeInput(phone),
+        titulaire: sanitizeInput(titulaire),
+        numero_ordre: sanitizeInput(numeroOrdre).toUpperCase(),
         piece_url: piecePreview || undefined,
         photo_url: devanturePreview || undefined,
-        email_pro: emailPro.trim().toLowerCase(),
+        email_pro: sanitizeInput(emailPro).toLowerCase(),
         mot_de_passe: motDePasse,
-        lat: Number(lat),
-        lng: Number(lng),
+        lat: numLat,
+        lng: numLng,
       });
 
       // SÉCURITÉ : Supprimer le token de paiement après utilisation réussie

@@ -10,6 +10,7 @@ import {
   activateSubscriptionInDB,
 } from '../services/store';
 import { getSession, setSession, clearSession } from '../lib/auth';
+import { checkRateLimit } from '../utils/security';
 import { Logo } from '../components/Logo';
 import { ActivateSubscriptionModal } from '../components/ActivateSubscriptionModal';
 import {
@@ -53,7 +54,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     .toLowerCase();
   const superAdminPassword = (
     import.meta.env.VITE_SUPER_ADMIN_PASSWORD ||
-    '2hcetafe'
+    ''
   ).trim();
 
   // Authentication State
@@ -97,6 +98,12 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
 
     const cleanE = gateEmail.trim().toLowerCase();
     const cleanP = gatePassword.trim();
+
+    const rateCheck = checkRateLimit('superadmin_gate_login', 5, 60 * 1000, 10 * 60 * 1000);
+    if (!rateCheck.allowed) {
+      setGateError(`Portail Super Admin verrouillé contre les attaques de force brute. Réessayez dans ${rateCheck.retryAfterSeconds} secondes.`);
+      return;
+    }
 
     if (cleanE === superAdminEmail && cleanP === superAdminPassword) {
       localStorage.setItem('is_super_admin', 'true');

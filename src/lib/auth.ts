@@ -36,11 +36,25 @@ export function setSession(session: UserSession): void {
   }
 }
 
+import { supabase } from './supabase';
+
 /**
- * Removes session
+ * Removes session, clears all authentication tokens and localStorage keys
  */
 export function clearSession(): void {
-  localStorage.removeItem(SESSION_KEY);
+  try {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('role');
+    localStorage.removeItem('efa_garde_role');
+    localStorage.removeItem('pharma_id');
+    localStorage.removeItem('is_super_admin');
+    localStorage.removeItem('efa_active_pharma_id');
+    sessionStorage.clear();
+    // Invalider également la session Supabase côté serveur
+    supabase.auth.signOut().catch(() => {});
+  } catch (err) {
+    console.warn('Error during session cleanup:', err);
+  }
 }
 
 /**

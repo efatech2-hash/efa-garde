@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Pharmacie, Garde, Conversation, Message, PresenceState, PlanType, PharmaciePending, Pub, PharmacyDailyStat } from '../types';
 import { INITIAL_PHARMACIES, INITIAL_PUBS } from './seedData';
 import { supabase } from '../lib/supabase';
+import { validateUploadedFile } from '../utils/security';
 
 const LOCAL_STORAGE_PHARMACIES = 'efa_pharmacies_v1';
 const LOCAL_STORAGE_GARDES = 'efa_gardes_v1';
@@ -640,9 +641,10 @@ export async function uploadMediaToSupabase(
   folder: 'audio' | 'images',
   filename?: string
 ): Promise<string> {
-  // 3. Stockage : Refuse si > 1 Mo
-  if (fileOrBlob.size > 1024 * 1024) {
-    throw new Error('Fichier supérieur à 1 Mo refusé. Veuillez sélectionner une photo de moins de 1 Mo.');
+  // 3. Stockage : Validation de taille et de type MIME stricte
+  const validation = validateUploadedFile(fileOrBlob, 1024 * 1024);
+  if (!validation.isValid) {
+    throw new Error(validation.error || 'Fichier non autorisé (max 1 Mo, extensions exécutables interdites).');
   }
 
   const sb = getSupabaseClient();

@@ -3,6 +3,7 @@ import { Pharmacie } from '../types';
 import { loadPharmacies, updatePharmacySuperAdmin } from '../services/store';
 import { setSession } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { checkRateLimit, sanitizeInput } from '../utils/security';
 import { Logo } from '../components/Logo';
 import { RegisterPharmacyModal } from '../components/RegisterPharmacyModal';
 import {
@@ -56,15 +57,21 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
       return;
     }
 
+    const rateCheck = checkRateLimit(`login_${cleanEmail.toLowerCase()}`, 5, 60 * 1000, 5 * 60 * 1000);
+    if (!rateCheck.allowed) {
+      setErrorMsg(`Trop de tentatives. Veuillez patienter ${rateCheck.retryAfterSeconds} secondes.`);
+      return;
+    }
+
     setLoading(true);
 
     const superAdminEmail = (
       import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
-      'efatech2@gmail.com'
+      ''
     ).trim();
     const superAdminPassword = (
       import.meta.env.VITE_SUPER_ADMIN_PASSWORD ||
-      '2hcetafe'
+      ''
     ).trim();
 
     // 7. COMPTE SUPER ADMIN PASSE-PARTOUT VIA PROCESS.ENV
