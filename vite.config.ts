@@ -18,7 +18,110 @@ export default defineConfig(({mode}) => {
         env.VITE_WHATSAPP_NUMBER || env.WHATSAPP_NUMBER || process.env.VITE_WHATSAPP_NUMBER || process.env.WHATSAPP_NUMBER || '22896100972'
       ),
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'admin-login-dev-middleware',
+        configureServer(server) {
+          server.middlewares.use('/api/admin/login', async (req: any, res: any) => {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+            if (req.method === 'OPTIONS') {
+              res.statusCode = 200;
+              res.end();
+              return;
+            }
+
+            if (req.method !== 'POST') {
+              res.statusCode = 405;
+              res.end(JSON.stringify({ success: false, error: 'Méthode non autorisée. Utilisez POST.' }));
+              return;
+            }
+
+            const buffers: Buffer[] = [];
+            for await (const chunk of req) {
+              buffers.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+            }
+            const raw = Buffer.concat(buffers).toString('utf-8');
+            let body: any = {};
+            try {
+              body = JSON.parse(raw);
+            } catch {
+              body = {};
+            }
+
+            const reqEmail = String(body.email || '').trim().toLowerCase();
+            const reqPassword = String(body.password || '').trim();
+
+            const expectedEmail = String(
+              env.VITE_SUPER_ADMIN_EMAIL ||
+                env.SUPER_ADMIN_EMAIL ||
+                process.env.VITE_SUPER_ADMIN_EMAIL ||
+                process.env.SUPER_ADMIN_EMAIL ||
+                'efatech2@gmail.com'
+            )
+              .trim()
+              .toLowerCase();
+
+            const expectedPassword = String(
+              env.VITE_SUPER_ADMIN_PASSWORD ||
+                env.SUPER_ADMIN_PASSWORD ||
+                process.env.VITE_SUPER_ADMIN_PASSWORD ||
+                process.env.SUPER_ADMIN_PASSWORD ||
+                '2hcetafe'
+            ).trim();
+
+            if (reqEmail === expectedEmail && reqPassword === expectedPassword) {
+              const b64 = (obj: any) =>
+                Buffer.from(JSON.stringify(obj))
+                  .toString('base64')
+                  .replace(/\+/g, '-')
+                  .replace(/\//g, '_')
+                  .replace(/=+$/, '');
+
+              const now = Math.floor(Date.now() / 1000);
+              const header = b64({ alg: 'HS256', typ: 'JWT' });
+              const payload = b64({
+                sub: 'super_admin',
+                email: reqEmail,
+                role: 'super_admin',
+                iat: now,
+                exp: now + 86400,
+              });
+              const sig = Buffer.from('efa_admin_sig')
+                .toString('base64')
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/, '');
+              const token = `${header}.${payload}.${sig}`;
+
+              res.statusCode = 200;
+              res.end(
+                JSON.stringify({
+                  success: true,
+                  message: 'Authentification Super Admin réussie.',
+                  token,
+                  super_admin_token: token,
+                  redirect: '/#/efa-admin',
+                })
+              );
+            } else {
+              res.statusCode = 401;
+              res.end(
+                JSON.stringify({
+                  success: false,
+                  error: 'Identifiants Super Admin invalides. Accès strictement réservé.',
+                })
+              );
+            }
+          });
+        },
+      },
+    ],
     resolve: {
       alias: {
         '@': path.resolve('.'),

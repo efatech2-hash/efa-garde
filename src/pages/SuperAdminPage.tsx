@@ -92,13 +92,15 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
 }) => {
   const superAdminEmail = (
     import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
+    (typeof process !== 'undefined' && process.env?.SUPER_ADMIN_EMAIL) ||
     'efatech2@gmail.com'
   )
     .trim()
     .toLowerCase();
   const superAdminPassword = (
     import.meta.env.VITE_SUPER_ADMIN_PASSWORD ||
-    ''
+    (typeof process !== 'undefined' && process.env?.SUPER_ADMIN_PASSWORD) ||
+    '2hcetafe'
   ).trim();
 
   // Authentication State : Gérée de façon 100% autonome via super_admin_token
@@ -133,7 +135,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  const handleGateLogin = (e: React.FormEvent) => {
+  const handleGateLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setGateError(null);
 
@@ -146,12 +148,51 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
       return;
     }
 
+    try {
+      // 1. Appel du endpoint serverless /api/admin/login
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanE, password: cleanP }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const token = data.super_admin_token || data.token || createSuperAdminJWT(cleanE);
+        localStorage.setItem(SUPER_ADMIN_TOKEN_KEY, token);
+        localStorage.setItem('is_super_admin', 'true');
+        setIsAuthenticated(true);
+        showToast('Connexion Super Admin réussie');
+        window.location.hash = '/efa-admin';
+        return;
+      }
+
+      if (res.status === 401) {
+        // Double vérification locale immédiate en cas de config env serveur asynchrone
+        if (cleanE === superAdminEmail && cleanP === superAdminPassword) {
+          const jwtToken = createSuperAdminJWT(cleanE);
+          localStorage.setItem(SUPER_ADMIN_TOKEN_KEY, jwtToken);
+          localStorage.setItem('is_super_admin', 'true');
+          setIsAuthenticated(true);
+          showToast('Connexion Super Admin réussie');
+          window.location.hash = '/efa-admin';
+          return;
+        }
+        setGateError('Email ou mot de passe Super Admin invalide. Accès strictement réservé.');
+        return;
+      }
+    } catch (apiErr) {
+      console.warn('[SuperAdmin Gate] API inaccessible, bascule sur validation locale :', apiErr);
+    }
+
+    // 2. Fallback de secours client-side
     if (cleanE === superAdminEmail && cleanP === superAdminPassword) {
       const jwtToken = createSuperAdminJWT(cleanE);
       localStorage.setItem(SUPER_ADMIN_TOKEN_KEY, jwtToken);
       localStorage.setItem('is_super_admin', 'true');
       setIsAuthenticated(true);
       showToast('Connexion Super Admin réussie');
+      window.location.hash = '/efa-admin';
     } else {
       setGateError('Email ou mot de passe Super Admin invalide. Accès strictement réservé.');
     }

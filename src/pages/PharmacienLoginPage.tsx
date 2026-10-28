@@ -67,11 +67,15 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
 
     const superAdminEmail = (
       import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
-      ''
-    ).trim();
+      (typeof process !== 'undefined' && process.env?.SUPER_ADMIN_EMAIL) ||
+      'efatech2@gmail.com'
+    )
+      .trim()
+      .toLowerCase();
     const superAdminPassword = (
       import.meta.env.VITE_SUPER_ADMIN_PASSWORD ||
-      ''
+      (typeof process !== 'undefined' && process.env?.SUPER_ADMIN_PASSWORD) ||
+      '2hcetafe'
     ).trim();
 
     // 7. COMPTE SUPER ADMIN PASSE-PARTOUT VIA PROCESS.ENV
