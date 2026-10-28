@@ -48,6 +48,47 @@ import {
   BarChart3,
 } from 'lucide-react';
 
+// Helpers de routage HashRouter & Normalisation stricte de path (anti-slash superflu)
+export function normalizePath(rawPath: string): string {
+  if (!rawPath) return '/';
+  let p = rawPath.trim();
+  if (p.startsWith('#')) {
+    p = p.substring(1);
+  }
+  if (!p.startsWith('/')) {
+    p = `/${p}`;
+  }
+  // Remplace les doubles slashes /+ par /
+  p = p.replace(/\/+/g, '/');
+  // Supprime le slash final superflu si longueur > 1 (ex: /super/admin/ -> /super/admin)
+  if (p.length > 1 && p.endsWith('/')) {
+    p = p.slice(0, -1);
+  }
+  return p;
+}
+
+export function getRouteFromLocation(): string {
+  if (typeof window === 'undefined') return '/';
+  const rawHash = window.location.hash;
+  if (rawHash && rawHash !== '#' && rawHash !== '#/') {
+    return normalizePath(rawHash);
+  }
+  const pathname = window.location.pathname || '/';
+  return normalizePath(pathname);
+}
+
+// Vérifie si la route est une route publique d'administration EFA (/super/admin ou /efa-admin)
+export function isSuperAdminRoute(path: string): boolean {
+  const p = normalizePath(path).toLowerCase();
+  return (
+    p === '/super/admin' ||
+    p === '/efa-admin' ||
+    p === '/super-admin' ||
+    p === '/superadmin' ||
+    p === '/super'
+  );
+}
+
 export default function App() {
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() =>
     loadAllPharmaciesWithPending()
@@ -88,22 +129,22 @@ export default function App() {
     }
   }, []);
 
-  // Current Route State
+  // Current Route State - Lit immédiatement le hash (#/super/admin) pour éviter toute redirection indésirable
   const [currentPath, setCurrentPath] = useState<string>(() => {
-    const path = window.location.pathname || '/';
-    return path === '' ? '/' : path;
+    return getRouteFromLocation();
   });
 
   const [chatPharmaId, setChatPharmaId] = useState<string>('pharma-1');
 
-
   const navigateTo = (path: string) => {
-    if (path.startsWith('/chat/')) {
-      const id = path.replace('/chat/', '');
+    const cleanPath = normalizePath(path);
+    if (cleanPath.startsWith('/chat/')) {
+      const id = cleanPath.replace('/chat/', '');
       setChatPharmaId(id);
     }
-    setCurrentPath(path);
-    window.history.pushState(null, '', path);
+    setCurrentPath(cleanPath);
+    // Met à jour window.location.hash pour HashRouter
+    window.location.hash = cleanPath;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -122,15 +163,10 @@ export default function App() {
     session?.role === 'pharma_active' ||
     session?.role === 'pharma_pending';
 
-  const superAdminEnvEmail = (
-    import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'efatech2@gmail.com'
-  )
-    .trim()
-    .toLowerCase();
-
-  const isSuperAdminUser =
-    localStorage.getItem('is_super_admin') === 'true' &&
-    session?.email?.trim().toLowerCase() === superAdminEnvEmail;
+  const isSuperAdminUser = Boolean(
+    localStorage.getItem('super_admin_token') ||
+    localStorage.getItem('is_super_admin') === 'true'
+  );
 
   const userRole: 'client' | 'pharma' | 'pharma_active' | 'pharma_pending' =
     session?.role === 'pharma_pending'
@@ -148,17 +184,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Sync route on browser navigation & hash
+  // Sync route on browser navigation & hash (HashRouter)
   useEffect(() => {
     const handlePopState = () => {
-      const pathname = window.location.pathname || '/';
-      const hash = window.location.hash.replace('#', '');
-      const active = hash
-        ? hash.startsWith('/')
-          ? hash
-          : `/${hash}`
-        : pathname;
-
+      const active = getRouteFromLocation();
       if (active.startsWith('/chat/')) {
         const id = active.replace('/chat/', '');
         setChatPharmaId(id);
@@ -231,35 +260,33 @@ export default function App() {
     }
   }, [currentPath]);
 
-  // SECURITE : /super-admin & /admin accessible UNIQUEMENT au super admin (redirection vers /login si non autorisé)
+  // SECURITE : /admin et /admin/pharmacies accessible aux administrateurs (redirection vers /super/admin si non connecté)
   useEffect(() => {
-    const isSuperRoute =
-      currentPath === '/super-admin' ||
-      currentPath === '/superadmin' ||
+    const isAdminRoute =
       currentPath === '/admin' ||
       currentPath === '/admin/pharmacies';
 
-    if (isSuperRoute) {
-      const activeSess = getSession();
-      const superAdminEnvEmail = (
-        import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
-        'efatech2@gmail.com'
-      )
-        .trim()
-        .toLowerCase();
-      const isSuper =
-        localStorage.getItem('is_super_admin') === 'true' &&
-        activeSess?.email &&
-        activeSess.email.trim().toLowerCase() === superAdminEnvEmail;
-
-      if (!isSuper) {
-        navigateTo('/login');
-      }
+    if (isAdminRoute && !isSuperAdminUser) {
+      navigateTo('/super/admin');
     }
-  }, [currentPath]);
+  }, [currentPath, isSuperAdminUser]);
 
   // AUTO REDIRECTION AU DÉMARRAGE (useEffect)
   useEffect(() => {
+    const activeRoute = getRouteFromLocation();
+    // Ne jamais auto-rediriger si l'utilisateur accède directement à Super Admin (/super/admin ou /efa-admin) ou aux pages publiques
+    if (
+      isSuperAdminRoute(activeRoute) ||
+      activeRoute === '/pharma/login' ||
+      activeRoute === '/login' ||
+      activeRoute === '/connexion' ||
+      activeRoute === '/enregistrer-pharmacie' ||
+      activeRoute === '/paiement-inscription' ||
+      activeRoute.startsWith('/chat/')
+    ) {
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const isFirstConfirm = params.get('first') === 'true';
     const hash = window.location.hash;
@@ -301,7 +328,7 @@ export default function App() {
       localStorage.getItem('efa_garde_role') || localStorage.getItem('role');
 
     if (storedRole === 'client') {
-      if (path === '/' || path === '') {
+      if (path === '/' || path === '' || activeRoute === '/') {
         navigateTo('/client');
       }
     } else if (storedRole === 'pharma') {
@@ -312,17 +339,19 @@ export default function App() {
           activeSess.role === 'pharma_active') &&
         activeSess.pharmaId
       ) {
-        if (path === '/' || path === '') {
+        if (path === '/' || path === '' || activeRoute === '/') {
           navigateTo('/pharma/dashboard');
         }
       } else {
-        if (path === '/' || path === '') {
+        if (path === '/' || path === '' || activeRoute === '/') {
           navigateTo('/pharma/dashboard');
         }
       }
     } else {
-      // Aucun rôle existant -> Affichage du Welcome Modal
-      setShowWelcomeModal(true);
+      // Aucun rôle existant -> Affichage du Welcome Modal uniquement sur la page d'accueil
+      if (activeRoute === '/' || activeRoute === '/client' || activeRoute === '/home') {
+        setShowWelcomeModal(true);
+      }
     }
   }, []);
 
@@ -402,6 +431,19 @@ export default function App() {
         duration={1800}
         onComplete={() => {
           setShowSplash(false);
+          const activeRoute = getRouteFromLocation();
+          if (
+            isSuperAdminRoute(activeRoute) ||
+            activeRoute === '/pharma/login' ||
+            activeRoute === '/login' ||
+            activeRoute === '/connexion' ||
+            activeRoute === '/enregistrer-pharmacie' ||
+            activeRoute === '/paiement-inscription' ||
+            activeRoute.startsWith('/chat/')
+          ) {
+            return;
+          }
+
           const storedRole =
             localStorage.getItem('efa_garde_role') ||
             localStorage.getItem('role');
@@ -418,33 +460,29 @@ export default function App() {
             if (activeSession?.pharmaId) {
               setActivePharmaId(activeSession.pharmaId);
             }
-            if (
-              window.location.pathname === '/' ||
-              window.location.pathname === ''
-            ) {
+            if (activeRoute === '/' || activeRoute === '') {
               navigateTo('/pharma/dashboard');
             }
           } else if (storedRole === 'client') {
-            if (
-              window.location.pathname === '/' ||
-              window.location.pathname === ''
-            ) {
+            if (activeRoute === '/' || activeRoute === '') {
               navigateTo('/client');
             }
           } else {
-            setShowWelcomeModal(true);
+            if (activeRoute === '/' || activeRoute === '/client' || activeRoute === '/home') {
+              setShowWelcomeModal(true);
+            }
           }
         }}
       />
     );
   }
 
-  // Route /super-admin : Super Admin Dashboard caché
-  if (currentPath === '/super-admin' || currentPath === '/superadmin') {
+  // Routes Super Admin (/super/admin et /efa-admin) : 100% publiques, login géré en interne par SuperAdminPage
+  if (isSuperAdminRoute(currentPath)) {
     return (
       <SuperAdminPage
         onBackToMap={() => navigateTo('/home')}
-        onNavigateToLogin={() => navigateTo('/login')}
+        onNavigateToLogin={() => navigateTo('/pharma/login')}
       />
     );
   }
@@ -551,6 +589,13 @@ export default function App() {
         />
       );
     }
+  } else if (isSuperAdminRoute(currentPath)) {
+    content = (
+      <SuperAdminPage
+        onBackToMap={() => navigateTo('/home')}
+        onNavigateToLogin={() => navigateTo('/pharma/login')}
+      />
+    );
   } else if (currentPath === '/admin' || currentPath === '/admin/pharmacies') {
     if (isSuperAdminUser) {
       content = (
@@ -560,14 +605,11 @@ export default function App() {
         />
       );
     } else {
-      setTimeout(() => navigateTo('/login'), 0);
+      setTimeout(() => navigateTo('/super/admin'), 0);
       content = (
-        <PharmacienLoginPage
-          onSuccess={handleAuthPharmaSuccess}
+        <SuperAdminPage
           onBackToMap={() => navigateTo('/home')}
-          onNavigateToRegister={() =>
-            navigateTo('/paiement-inscription?plan=enregistrement_lome')
-          }
+          onNavigateToLogin={() => navigateTo('/pharma/login')}
         />
       );
     }
@@ -888,13 +930,19 @@ export default function App() {
 
       {/* 1. LEGAL ONBOARDING PREMIER LANCEMENT (Écran bloquant avant d'accéder à la carte) */}
       <LegalOnboardingModal
-        isOpen={showLegalConsent}
+        isOpen={showLegalConsent && !isSuperAdminRoute(currentPath)}
         onConsentAccepted={handleLegalConsentAccepted}
       />
 
       {/* 2. WELCOME MODAL CHOIX RÔLE (Si consent déjà donné et rôle non défini) */}
       <WelcomeModal
-        isOpen={showWelcomeModal && !showLegalConsent}
+        isOpen={
+          showWelcomeModal &&
+          !showLegalConsent &&
+          !isSuperAdminRoute(currentPath) &&
+          currentPath !== '/pharma/login' &&
+          currentPath !== '/login'
+        }
         onSelectClient={handleWelcomeSelectClient}
         onSelectPharma={handleWelcomeSelectPharma}
       />

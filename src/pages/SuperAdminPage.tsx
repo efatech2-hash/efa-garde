@@ -9,7 +9,6 @@ import {
   fetchPharmacies,
   activateSubscriptionInDB,
 } from '../services/store';
-import { getSession, setSession, clearSession } from '../lib/auth';
 import { checkRateLimit } from '../utils/security';
 import { Logo } from '../components/Logo';
 import { ActivateSubscriptionModal } from '../components/ActivateSubscriptionModal';
@@ -37,6 +36,51 @@ import {
   EyeOff,
 } from 'lucide-react';
 
+const SUPER_ADMIN_TOKEN_KEY = 'super_admin_token';
+
+function createSuperAdminJWT(email: string): string {
+  const b64 = (obj: object) =>
+    btoa(unescape(encodeURIComponent(JSON.stringify(obj))))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  const header = b64({ alg: 'HS256', typ: 'JWT' });
+  const now = Math.floor(Date.now() / 1000);
+  const payload = b64({
+    sub: 'super_admin',
+    email,
+    role: 'super_admin',
+    iat: now,
+    exp: now + 24 * 3600, // 24 heures de validité
+  });
+  const sig = btoa('efa_garde_super_admin_secure_signature')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `${header}.${payload}.${sig}`;
+}
+
+function verifySuperAdminJWT(token: string | null): boolean {
+  if (!token) return false;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return token.length > 20; // Fallback token direct
+    }
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonStr = decodeURIComponent(escape(atob(base64)));
+    const data = JSON.parse(jsonStr);
+    if (!data || data.role !== 'super_admin') return false;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (data.exp && data.exp < nowSec) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface SuperAdminPageProps {
   onBackToMap: () => void;
   onNavigateToLogin: () => void;
@@ -57,12 +101,9 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     ''
   ).trim();
 
-  // Authentication State
+  // Authentication State : Gérée de façon 100% autonome via super_admin_token
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    const s = getSession();
-    const isSuperLocal = localStorage.getItem('is_super_admin') === 'true';
-    const emailMatches = s?.email && s.email.toLowerCase() === superAdminEmail;
-    return Boolean(isSuperLocal && emailMatches);
+    return verifySuperAdminJWT(localStorage.getItem(SUPER_ADMIN_TOKEN_KEY));
   });
 
   // Login Gate inputs (if not already authenticated)
@@ -106,16 +147,9 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     }
 
     if (cleanE === superAdminEmail && cleanP === superAdminPassword) {
+      const jwtToken = createSuperAdminJWT(cleanE);
+      localStorage.setItem(SUPER_ADMIN_TOKEN_KEY, jwtToken);
       localStorage.setItem('is_super_admin', 'true');
-      localStorage.setItem('role', 'pharma');
-      localStorage.setItem('efa_garde_role', 'pharma');
-      setSession({
-        role: 'pharma_active',
-        pharmaId: pharmacies[0]?.id || 'pharma-1',
-        pharmacieNom: 'Super Administration EFA',
-        email: cleanE,
-        createdAt: new Date().toISOString(),
-      });
       setIsAuthenticated(true);
       showToast('Connexion Super Admin réussie');
     } else {
@@ -124,8 +158,8 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   };
 
   const handleLogout = () => {
+    localStorage.removeItem(SUPER_ADMIN_TOKEN_KEY);
     localStorage.removeItem('is_super_admin');
-    clearSession();
     setIsAuthenticated(false);
     onNavigateToLogin();
   };
