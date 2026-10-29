@@ -7,6 +7,7 @@ interface SidebarProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   onLogout?: () => void;
+  unreadCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -14,6 +15,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentPath,
   onNavigate,
   onLogout,
+  unreadCount = 0,
 }) => {
   const isPharma =
     role === 'pharma' || role === 'pharma_active' || role === 'pharma_pending';
@@ -109,10 +111,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }`}
               title={tab.label}
             >
-              <Icon
-                className="w-6 h-6 shrink-0"
-                style={{ width: 24, height: 24 }}
-              />
+              <div className="relative flex items-center justify-center">
+                <Icon
+                  className="w-6 h-6 shrink-0"
+                  style={{ width: 24, height: 24 }}
+                />
+                {tab.id === 'chat' && unreadCount > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-[#25D366] text-white text-[11px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full animate-pulse px-1 shadow-sm leading-none">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </div>
               <span
                 className={`text-[10px] tracking-tight leading-none mt-1.5 ${
                   active ? 'font-black text-white' : 'font-semibold text-slate-400'

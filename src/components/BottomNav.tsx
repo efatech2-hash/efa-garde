@@ -5,12 +5,14 @@ interface BottomNavProps {
   role: 'client' | 'pharma' | 'pharma_active' | 'pharma_pending';
   currentPath: string;
   onNavigate: (path: string) => void;
+  unreadCount?: number;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   role,
   currentPath,
   onNavigate,
+  unreadCount = 0,
 }) => {
   // Masqué dans la vue de chat plein écran sur mobile
   if (currentPath.startsWith('/chat')) {
@@ -106,6 +108,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                   active ? 'scale-110 stroke-[2.2]' : 'stroke-[1.8]'
                 }`}
               />
+              {tab.id === 'chat' && unreadCount > 0 && (
+                <span className="absolute -top-2 -right-2 bg-[#25D366] text-white text-[11px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full animate-pulse px-1 shadow-sm leading-none">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
               {active && (
                 <span className="absolute -bottom-1 w-1.5 h-1.5 rounded-full bg-[#0A3D8F]" />
               )}

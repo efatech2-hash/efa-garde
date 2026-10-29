@@ -9,6 +9,10 @@ import {
   cleanExpiredMessages,
   uploadMediaToSupabase,
   isMessageExpired,
+  blockConversation,
+  unblockConversation,
+  markConversationAsRead,
+  getSupabaseClient,
 } from '../services/store';
 import { compressChatImage } from '../utils/imageCompressor';
 import { playNotificationSound } from '../services/sound';
@@ -32,6 +36,11 @@ import {
   X,
   Trash2,
   Image as ImageIcon,
+  MoreVertical,
+  Ban,
+  ShieldAlert,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface PharmaInboxPageProps {
@@ -161,6 +170,19 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [fullViewImageUrl, setFullViewImageUrl] = useState<string | null>(null);
 
+  // Toast & Modals
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showOptionsDropdown, setShowOptionsDropdown] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockMode, setBlockMode] = useState<'block' | 'report'>('block');
+  const [blockReason, setBlockReason] = useState<string>('Spam');
+  const [blockDescription, setBlockDescription] = useState<string>('');
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   // Photo sending
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -186,10 +208,14 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   // Reload conversations
   const refreshConvs = () => {
     if (!currentPharma) return;
-    const list = loadConversations(currentPharma.id);
+    const pharmaUserId = (currentPharma as any).owner_user_id || (currentPharma as any).user_id || currentPharma.id;
+    const list = loadConversations(currentPharma.id, undefined, pharmaUserId);
     setConversations(list);
     if (!selectedConv && list.length > 0) {
       setSelectedConv(list[0]);
+    } else if (selectedConv) {
+      const updatedSelected = list.find((c) => c.id === selectedConv.id);
+      if (updatedSelected) setSelectedConv(updatedSelected);
     }
   };
 
@@ -197,16 +223,17 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     refreshConvs();
   }, [currentPharma?.id]);
 
-  // Load messages for selected conversation (filtering 48h)
+  // Load messages for selected conversation & mark as read
   useEffect(() => {
     if (!selectedConv) {
       setMessages([]);
       return;
     }
+    markConversationAsRead(selectedConv.id, 'pharma', currentPharma?.id);
     const msgs = loadMessages(selectedConv.id);
     setMessages(msgs);
     prevMsgCountRef.current = msgs.length;
-  }, [selectedConv]);
+  }, [selectedConv?.id, currentPharma?.id]);
 
   // Subscribe to realtime store & sound notifications
   useEffect(() => {
@@ -228,8 +255,11 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
         const msgs = loadMessages(selectedConv.id);
         if (msgs.length > prevMsgCountRef.current) {
           const lastMsg = msgs[msgs.length - 1];
-          if (lastMsg.sender === 'client' && soundEnabled) {
-            playNotificationSound();
+          if (lastMsg.sender === 'client') {
+            if (soundEnabled) {
+              playNotificationSound();
+            }
+            markConversationAsRead(selectedConv.id, 'pharma', currentPharma.id);
           }
         }
         prevMsgCountRef.current = msgs.length;
@@ -243,22 +273,69 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     };
   }, [currentPharma?.id, selectedConv, soundEnabled]);
 
-  // Auto-scroll: Quand nouveau message arrive, scroll auto en bas avec ref.scrollIntoView({behavior: 'smooth'})
+  // Auto-scroll
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages.length, selectedConv?.id]);
 
+  const handleOpenBlockModal = (mode: 'block' | 'report') => {
+    setBlockMode(mode);
+    setBlockReason('Spam');
+    setBlockDescription('');
+    setShowOptionsDropdown(false);
+    setShowBlockModal(true);
+  };
+
+  const handleExecuteBlock = () => {
+    if (!selectedConv || !currentPharma) return;
+    const isReport = blockMode === 'report';
+    blockConversation(
+      selectedConv.id,
+      currentPharma.id,
+      'pharmacy',
+      isReport,
+      { reason: blockReason, description: blockDescription.trim() }
+    );
+    setShowBlockModal(false);
+    showToast(isReport ? 'Patient signalé et bloqué avec succès' : 'Patient bloqué');
+    refreshConvs();
+  };
+
+  const handleUnblock = () => {
+    if (!selectedConv) return;
+    unblockConversation(selectedConv.id);
+    showToast('Conversation débloquée');
+    refreshConvs();
+  };
+
   const handleSendReply = (quickMsg?: string) => {
     const text = (quickMsg !== undefined ? quickMsg : inputText).trim();
     if (!text || !selectedConv) return;
 
-    addMessage(selectedConv.id, 'pharma', text, { type: 'text' });
-    setInputText('');
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 50);
+    if (selectedConv.is_blocked) {
+      if (selectedConv.blocked_by_type === 'client') {
+        showToast('Cette conversation a été bloquée par le client.');
+      } else {
+        showToast('Vous avez bloqué ce patient. Débloquez-le pour répondre.');
+      }
+      return;
+    }
+
+    try {
+      addMessage(selectedConv.id, 'pharma', text, {
+        type: 'text',
+        senderId: currentPharma?.id || 'pharma-1',
+        receiverId: selectedConv.client_id,
+      });
+      setInputText('');
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur envoi message');
+    }
   };
 
   // Photo handlers
@@ -403,7 +480,21 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   const visibleMessages = messages.filter((m) => !isMessageExpired(m));
 
   return (
-    <div className="w-full h-full max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col min-h-0 overflow-hidden gap-2 sm:gap-3">
+    <div className="w-full h-full max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col min-h-0 overflow-hidden gap-2 sm:gap-3 relative">
+      {/* Toast Alert */}
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-slate-900/95 text-white border-2 border-emerald-400 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs sm:text-sm font-black animate-in fade-in slide-in-from-top-3 max-w-sm w-[90%] pointer-events-auto">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span className="flex-1">{toastMessage}</span>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="p-1 rounded-full text-slate-400 hover:text-white cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-3 sm:p-4 rounded-2xl shadow-lg shrink-0">
         <div className="flex items-center gap-3">
@@ -551,8 +642,61 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                   </div>
                 </div>
 
-                <div className="text-xs text-white/90 truncate font-semibold shrink-0">
-                  {currentPharma.nom}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="hidden sm:inline text-xs text-white/90 truncate font-semibold">
+                    {currentPharma.nom}
+                  </span>
+
+                  {/* Menu Options ... (Bloquer / Signaler) */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowOptionsDropdown(!showOptionsDropdown)}
+                      className="p-1.5 rounded-full hover:bg-white/10 text-white transition-colors cursor-pointer"
+                      title="Options de discussion"
+                    >
+                      <MoreVertical className="w-5 h-5" />
+                    </button>
+
+                    {showOptionsDropdown && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowOptionsDropdown(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-2xl shadow-2xl border border-slate-200 py-1.5 z-50 text-slate-800 text-xs font-semibold animate-in fade-in slide-in-from-top-1">
+                          {selectedConv?.is_blocked && selectedConv.blocked_by_type === 'pharmacy' ? (
+                            <button
+                              onClick={() => {
+                                setShowOptionsDropdown(false);
+                                handleUnblock();
+                              }}
+                              className="w-full px-3.5 py-2.5 text-left hover:bg-slate-100 flex items-center gap-2 text-emerald-600 font-bold cursor-pointer"
+                            >
+                              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                              <span>Débloquer ce patient</span>
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleOpenBlockModal('block')}
+                                className="w-full px-3.5 py-2.5 text-left hover:bg-slate-100 flex items-center gap-2 text-amber-700 cursor-pointer"
+                              >
+                                <Ban className="w-4 h-4 text-amber-600" />
+                                <span>🚫 Bloquer ce patient</span>
+                              </button>
+                              <button
+                                onClick={() => handleOpenBlockModal('report')}
+                                className="w-full px-3.5 py-2.5 text-left hover:bg-slate-100 flex items-center gap-2 text-red-600 border-t border-slate-100 cursor-pointer"
+                              >
+                                <ShieldAlert className="w-4 h-4 text-red-600" />
+                                <span>⚠️ Signaler et Bloquer</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -639,118 +783,145 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                 <div ref={messagesEndRef} className="h-2 shrink-0" />
               </div>
 
-              {/* Quick Reply Presets */}
-              <div className="px-3 py-1.5 bg-[#f0f2f5] border-t border-gray-300 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-                {pharmaChips.map((chip, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSendReply(chip)}
-                    className="whitespace-nowrap px-3 py-1 rounded-full bg-white hover:bg-gray-100 text-[#111b21] border border-gray-300 text-[11px] font-medium transition-colors cursor-pointer shrink-0 shadow-2xs"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
-
-              {/* Send Input Bar */}
-              <div className="p-2 sm:p-3 bg-[#f0f2f5] border-t border-gray-300">
-                {micPermissionError && (
-                  <div className="mb-2 p-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between gap-2 shadow-xs">
-                    <span>{micPermissionError}</span>
-                    <button onClick={() => setMicPermissionError(null)} className="p-0.5 text-amber-700">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  onChange={handleFileSelected}
-                  className="hidden"
-                />
-                <input
-                  type="file"
-                  ref={cameraInputRef}
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleFileSelected}
-                  className="hidden"
-                />
-
-                {isRecording ? (
-                  <div className="flex items-center justify-between gap-3 bg-white px-3 py-2 rounded-xl border border-red-200">
-                    <span className="text-xs font-bold text-red-600 flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-                      Enregistrement vocal ({recordingSeconds}s)
-                    </span>
-                    <div className="flex items-center gap-2">
+              {/* Quick Reply Presets or Blocked Banner */}
+              {selectedConv?.is_blocked ? (
+                <div className="p-3 sm:p-4 bg-slate-100 border-t border-gray-300">
+                  {selectedConv.blocked_by_type === 'pharmacy' ? (
+                    <div className="bg-slate-200 border border-slate-300 rounded-2xl p-3 sm:p-4 flex items-center justify-between gap-3 text-slate-800 shadow-inner">
+                      <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold">
+                        <Ban className="w-4 h-4 text-slate-600 shrink-0" />
+                        <span>🚫 Vous avez bloqué ce patient</span>
+                      </div>
                       <button
-                        onClick={cancelRecording}
-                        className="p-1.5 text-gray-500 hover:text-red-500"
+                        type="button"
+                        onClick={handleUnblock}
+                        className="px-4 py-2 bg-[#0A3D8F] text-white rounded-xl text-xs font-bold hover:bg-[#082e6d] transition-all cursor-pointer shadow-md active:scale-95 shrink-0"
                       >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={stopAndSendRecording}
-                        className="px-3 py-1.5 rounded-lg bg-[#0A3D8F] hover:bg-[#082f6e] text-white text-xs font-bold flex items-center gap-1"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        Envoyer
+                        Débloquer
                       </button>
                     </div>
+                  ) : (
+                    <div className="bg-red-50 border border-red-200 rounded-2xl p-3 sm:p-4 flex items-center justify-center gap-2 text-red-700 text-xs sm:text-sm font-semibold text-center shadow-xs">
+                      <Ban className="w-4 h-4 text-red-500 shrink-0" />
+                      <span>🚫 Ce patient a bloqué cette conversation</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="px-3 py-1.5 bg-[#f0f2f5] border-t border-gray-300 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+                    {pharmaChips.map((chip, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleSendReply(chip)}
+                        className="whitespace-nowrap px-3 py-1 rounded-full bg-white hover:bg-gray-100 text-[#111b21] border border-gray-300 text-[11px] font-medium transition-colors cursor-pointer shrink-0 shadow-2xs"
+                      >
+                        {chip}
+                      </button>
+                    ))}
                   </div>
-                ) : (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleSendReply();
-                    }}
-                    className="flex items-center gap-1.5 sm:gap-2"
-                  >
-                    <button
-                      type="button"
-                      onClick={startRecording}
-                      className="w-10 h-10 rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-gray-200 flex items-center justify-center shrink-0"
-                      title="Enregistrer message vocal"
-                    >
-                      <Mic className="w-5 h-5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-10 h-10 rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-gray-200 flex items-center justify-center shrink-0"
-                      title="Joindre image"
-                    >
-                      <Paperclip className="w-5 h-5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="w-10 h-10 rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-gray-200 flex items-center justify-center shrink-0"
-                      title="Prendre photo"
-                    >
-                      <Camera className="w-5 h-5" />
-                    </button>
 
+                  {/* Send Input Bar */}
+                  <div className="p-2 sm:p-3 bg-[#f0f2f5] border-t border-gray-300">
+                    {micPermissionError && (
+                      <div className="mb-2 p-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between gap-2 shadow-xs">
+                        <span>{micPermissionError}</span>
+                        <button onClick={() => setMicPermissionError(null)} className="p-0.5 text-amber-700">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                     <input
-                      type="text"
-                      placeholder="Répondre au patient..."
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      className="flex-1 h-11 bg-white text-sm text-[#111b21] px-3.5 rounded-xl border border-gray-300 focus:outline-none focus:border-[#0A3D8F] placeholder:text-gray-500 shadow-2xs"
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleFileSelected}
+                      className="hidden"
                     />
-                    <button
-                      type="submit"
-                      disabled={!inputText.trim()}
-                      className="h-11 w-11 rounded-xl bg-[#0A3D8F] hover:bg-[#082f6e] disabled:opacity-40 text-white font-bold transition-all shadow-md flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
-                      title="Envoyer"
-                    >
-                      <Send className="w-5 h-5" />
-                    </button>
-                  </form>
-                )}
-              </div>
+                    <input
+                      type="file"
+                      ref={cameraInputRef}
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleFileSelected}
+                      className="hidden"
+                    />
+
+                    {isRecording ? (
+                      <div className="flex items-center justify-between gap-3 bg-white px-3 py-2 rounded-xl border border-red-200">
+                        <span className="text-xs font-bold text-red-600 flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                          Enregistrement vocal ({recordingSeconds}s)
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={cancelRecording}
+                            className="p-1.5 text-gray-500 hover:text-red-500"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={stopAndSendRecording}
+                            className="px-3 py-1.5 rounded-lg bg-[#0A3D8F] hover:bg-[#082f6e] text-white text-xs font-bold flex items-center gap-1"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            Envoyer
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          handleSendReply();
+                        }}
+                        className="flex items-center gap-1.5 sm:gap-2"
+                      >
+                        <button
+                          type="button"
+                          onClick={startRecording}
+                          className="w-10 h-10 rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-gray-200 flex items-center justify-center shrink-0"
+                          title="Enregistrer message vocal"
+                        >
+                          <Mic className="w-5 h-5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-10 h-10 rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-gray-200 flex items-center justify-center shrink-0"
+                          title="Joindre image"
+                        >
+                          <Paperclip className="w-5 h-5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => cameraInputRef.current?.click()}
+                          className="w-10 h-10 rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-gray-200 flex items-center justify-center shrink-0"
+                          title="Prendre photo"
+                        >
+                          <Camera className="w-5 h-5" />
+                        </button>
+
+                        <input
+                          type="text"
+                          placeholder="Répondre au patient..."
+                          value={inputText}
+                          onChange={(e) => setInputText(e.target.value)}
+                          className="flex-1 h-11 bg-white text-sm text-[#111b21] px-3.5 rounded-xl border border-gray-300 focus:outline-none focus:border-[#0A3D8F] placeholder:text-gray-500 shadow-2xs"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!inputText.trim()}
+                          className="h-11 w-11 rounded-xl bg-[#0A3D8F] hover:bg-[#082f6e] disabled:opacity-40 text-white font-bold transition-all shadow-md flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
+                          title="Envoyer"
+                        >
+                          <Send className="w-5 h-5" />
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-gray-500">
@@ -832,6 +1003,107 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
             alt="Plein écran"
             className="max-h-[90vh] max-w-full rounded-xl object-contain"
           />
+        </div>
+      )}
+
+      {/* MODALE DE BLOCAGE & SIGNALEMENT */}
+      {showBlockModal && selectedConv && (
+        <div className="fixed inset-0 z-[110] bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-900 animate-in fade-in zoom-in-95 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-lg ${
+                    blockMode === 'report'
+                      ? 'bg-red-100 text-red-600'
+                      : 'bg-amber-100 text-amber-700'
+                  }`}
+                >
+                  {blockMode === 'report' ? (
+                    <ShieldAlert className="w-5 h-5" />
+                  ) : (
+                    <Ban className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    {blockMode === 'report'
+                      ? 'Signaler et Bloquer le patient'
+                      : 'Bloquer le patient'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Patient {selectedConv.client_id.replace('client-', '#')}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBlockModal(false)}
+                className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-700 block">
+                Motif du blocage :
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Spam', 'Harcèlement', 'Injures', 'Autre'].map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => setBlockReason(reason)}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-left transition-all cursor-pointer ${
+                      blockReason === reason
+                        ? 'border-red-500 bg-red-50 text-red-700 ring-2 ring-red-400/20'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+
+              {blockMode === 'report' && (
+                <div className="space-y-1 pt-1">
+                  <label className="text-xs font-bold text-slate-700 block">
+                    Détails du signalement (optionnel) :
+                  </label>
+                  <textarea
+                    value={blockDescription}
+                    onChange={(e) => setBlockDescription(e.target.value)}
+                    placeholder="Précisez le motif (harcèlement répété, demandes illicites, insultes...)"
+                    rows={3}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBlockModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBlock}
+                className={`px-5 py-2.5 rounded-xl text-xs font-extrabold text-white shadow-md active:scale-95 transition-all cursor-pointer ${
+                  blockMode === 'report'
+                    ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20'
+                    : 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'
+                }`}
+              >
+                {blockMode === 'report'
+                  ? 'Signaler et Bloquer'
+                  : 'Confirmer le blocage'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

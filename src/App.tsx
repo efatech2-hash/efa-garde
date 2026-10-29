@@ -34,6 +34,7 @@ import { Sidebar } from './components/Sidebar';
 import { WelcomeModal } from './components/WelcomeModal';
 import { LegalOnboardingModal } from './components/LegalOnboardingModal';
 import { hasUserConsentSync, checkUserConsent } from './services/consentService';
+import { useUnreadConversations } from './hooks/useUnreadConversations';
 import { supabase } from './lib/supabase';
 import {
   LogOut,
@@ -174,6 +175,9 @@ export default function App() {
       : isPharmaUser
       ? 'pharma_active'
       : 'client';
+
+  // Hook global de suivi des conversations non lues avec alertes sonores et haptiques
+  const { unreadCount } = useUnreadConversations(userRole, activePharmaId);
 
   // Auto-nettoyage des messages et photos de plus de 24h (cycle auto-delete 24h)
   useEffect(() => {
@@ -812,6 +816,7 @@ export default function App() {
         currentPath={currentPath}
         onNavigate={navigateTo}
         onLogout={handleLogout}
+        unreadCount={unreadCount}
       />
 
       {/* Main App Container */}
@@ -926,6 +931,7 @@ export default function App() {
         role={userRole}
         currentPath={currentPath}
         onNavigate={navigateTo}
+        unreadCount={unreadCount}
       />
 
       {/* 1. LEGAL ONBOARDING PREMIER LANCEMENT (Écran bloquant avant d'accéder à la carte) */}

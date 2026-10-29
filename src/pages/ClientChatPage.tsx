@@ -8,7 +8,11 @@ import {
   trackPresence,
   cleanExpiredMessages,
   uploadMediaToSupabase,
-  isMessageExpired
+  isMessageExpired,
+  blockConversation,
+  unblockConversation,
+  markConversationAsRead,
+  loadConversations,
 } from '../services/store';
 import { playNotificationSound } from '../services/sound';
 import { compressChatImage } from '../utils/imageCompressor';
@@ -31,6 +35,9 @@ import {
   MapPin,
   Info,
   AlertCircle,
+  MoreVertical,
+  Ban,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface ClientChatPageProps {
@@ -197,6 +204,13 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     setTimeout(() => setToastMessage(null), 5000);
   };
 
+  // State pour blocage & signalement anti-harcèlement
+  const [showOptionsDropdown, setShowOptionsDropdown] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockMode, setBlockMode] = useState<'block' | 'report'>('block');
+  const [blockReason, setBlockReason] = useState<string>('Spam');
+  const [blockDescription, setBlockDescription] = useState<string>('');
+
   // Refs for elements
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -212,8 +226,10 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   // Initialize conversation
   useEffect(() => {
     if (!pharmacy) return;
-    const conv = getOrCreateConversation(clientId, pharmacy.id);
+    const pharmacyUserId = (pharmacy as any).owner_user_id || (pharmacy as any).user_id || pharmacy.id;
+    const conv = getOrCreateConversation(clientId, pharmacy.id, pharmacyUserId);
     setConversation(conv);
+    markConversationAsRead(conv.id, 'client', clientId);
     const msgs = loadMessages(conv.id);
     setMessages(msgs);
     prevMessagesCountRef.current = msgs.length;
@@ -230,10 +246,18 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         const last = updated[updated.length - 1];
         if (last.sender === 'pharma') {
           playNotificationSound();
+          markConversationAsRead(conversation.id, 'client', clientId);
         }
       }
       prevMessagesCountRef.current = updated.length;
       setMessages(updated);
+
+      // Rafraîchir l'état de la conversation (is_blocked, etc.)
+      const allConvs = loadConversations();
+      const curr = allConvs.find((c) => c.id === conversation.id);
+      if (curr) {
+        setConversation(curr);
+      }
 
       const current = pharmacies.find((p) => p.id === pharmacieId);
       if (current) setPharmaOnline(current.is_online);
@@ -260,6 +284,41 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     };
   }, [conversation, clientId, pharmacy?.id, pharmacies, pharmacieId]);
 
+  // Actions de blocage et déblocage
+  const handleOpenBlockModal = (mode: 'block' | 'report') => {
+    setBlockMode(mode);
+    setBlockReason('Spam');
+    setBlockDescription('');
+    setShowOptionsDropdown(false);
+    setShowBlockModal(true);
+  };
+
+  const handleExecuteBlock = () => {
+    if (!conversation) return;
+    const isReport = blockMode === 'report';
+    blockConversation(
+      conversation.id,
+      clientId,
+      'client',
+      isReport,
+      { reason: blockReason, description: blockDescription.trim() }
+    );
+    setShowBlockModal(false);
+    showToast(isReport ? 'Officine signalée et bloquée avec succès' : 'Officine bloquée');
+    const allConvs = loadConversations();
+    const updated = allConvs.find((c) => c.id === conversation.id);
+    if (updated) setConversation(updated);
+  };
+
+  const handleUnblock = () => {
+    if (!conversation) return;
+    unblockConversation(conversation.id);
+    showToast('Conversation débloquée');
+    const allConvs = loadConversations();
+    const updated = allConvs.find((c) => c.id === conversation.id);
+    if (updated) setConversation(updated);
+  };
+
   // Auto-scroll to bottom on messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -278,13 +337,31 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     const text = (textToSend !== undefined ? textToSend : inputText).trim();
     if (!text || !conversation) return;
 
-    setIsSending(true);
-    addMessage(conversation.id, 'client', text, { type: 'text' });
-    setInputText('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+    if (conversation.is_blocked) {
+      if (conversation.blocked_by_type === 'pharmacy') {
+        showToast('Vous avez été bloqué par cette pharmacie.');
+      } else {
+        showToast('Vous avez bloqué cette conversation. Débloquez-la pour écrire.');
+      }
+      return;
     }
-    setIsSending(false);
+
+    setIsSending(true);
+    try {
+      addMessage(conversation.id, 'client', text, {
+        type: 'text',
+        senderId: clientId,
+        receiverId: conversation.pharmacy_user_id || pharmacy?.id || 'pharma-1',
+      });
+      setInputText('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur envoi message');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   // Key press on textarea: Enter sends, Shift+Enter new line
@@ -684,6 +761,57 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
             <Phone className="w-4 h-4" />
             <span className="hidden sm:inline">Appeler</span>
           </a>
+
+          {/* Menu Options ... (Bloquer / Signaler) */}
+          <div className="relative">
+            <button
+              onClick={() => setShowOptionsDropdown(!showOptionsDropdown)}
+              className="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-white transition-colors cursor-pointer"
+              title="Options de discussion"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
+
+            {showOptionsDropdown && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowOptionsDropdown(false)}
+                />
+                <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-2xl shadow-2xl border border-slate-200 py-1.5 z-50 text-slate-800 text-xs font-semibold animate-in fade-in slide-in-from-top-1">
+                  {conversation?.is_blocked && conversation.blocked_by_type === 'client' ? (
+                    <button
+                      onClick={() => {
+                        setShowOptionsDropdown(false);
+                        handleUnblock();
+                      }}
+                      className="w-full px-3.5 py-2.5 text-left hover:bg-slate-100 flex items-center gap-2 text-emerald-600 font-bold cursor-pointer"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      <span>Débloquer l'officine</span>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleOpenBlockModal('block')}
+                        className="w-full px-3.5 py-2.5 text-left hover:bg-slate-100 flex items-center gap-2 text-amber-700 cursor-pointer"
+                      >
+                        <Ban className="w-4 h-4 text-amber-600" />
+                        <span>🚫 Bloquer l'officine</span>
+                      </button>
+                      <button
+                        onClick={() => handleOpenBlockModal('report')}
+                        className="w-full px-3.5 py-2.5 text-left hover:bg-slate-100 flex items-center gap-2 text-red-600 border-t border-slate-100 cursor-pointer"
+                      >
+                        <ShieldAlert className="w-4 h-4 text-red-600" />
+                        <span>⚠️ Signaler et Bloquer</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -828,158 +956,185 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
 
       {/* 3. INPUT BARRE EN BAS FIXED : position fixed bottom-0 left-0 right-0, avec safe-area-inset-bottom, bg-[#f0f0f0] p-2, flex gap-2 items-end */}
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-[#f0f0f0] border-t border-gray-300/80 shadow-md chat-input-bar pb-safe">
-        {/* Quick Suggestions Chips */}
-        <div className="px-3 pt-1.5 pb-1 flex items-center gap-2 overflow-x-auto no-scrollbar max-w-5xl mx-auto w-full">
-          {quickChips.map((chip, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSendText(chip)}
-              className="whitespace-nowrap px-3 py-1 rounded-full bg-white hover:bg-gray-50 text-[#111b21] border border-gray-300 text-xs font-medium transition-colors cursor-pointer shrink-0 shadow-2xs"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-
-        <div className="p-2 pt-0 max-w-5xl mx-auto w-full">
-          {/* Microphone Permission Toast Banner */}
-          {micPermissionError && (
-            <div className="mb-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between gap-2 shadow-sm animate-in fade-in">
-              <div className="flex items-center gap-2">
-                <Mic className="w-4 h-4 text-amber-600 shrink-0" />
-                <span className="font-medium">{micPermissionError}</span>
-              </div>
-              <button
-                onClick={() => setMicPermissionError(null)}
-                className="p-1 text-amber-700 hover:text-amber-900 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Hidden File Inputs */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept="image/*,.pdf,.doc,.docx"
-            onChange={handleFileSelected}
-            className="hidden"
-          />
-          <input
-            type="file"
-            ref={cameraInputRef}
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileSelected}
-            className="hidden"
-          />
-
-          {/* Live Audio Recording Display */}
-          {isRecording ? (
-            <div className="flex items-center justify-between gap-3 bg-white px-3 py-2 rounded-full border border-red-200 shadow-inner min-h-[44px]">
-              <div className="flex items-center gap-2.5">
-                <span className="w-3 h-3 rounded-full bg-red-500 animate-ping ml-1" />
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-red-600 flex items-center gap-1">
-                    Enregistrement vocal ({recordingSeconds}s)
-                  </span>
-                  <span className="text-[10px] text-gray-500">
-                    Relâchez ou cliquez pour envoyer
-                  </span>
+        {conversation?.is_blocked ? (
+          <div className="p-3 max-w-5xl mx-auto w-full">
+            {conversation.blocked_by_type === 'client' ? (
+              <div className="bg-slate-200/90 border border-slate-300 rounded-2xl p-3 sm:p-4 flex items-center justify-between gap-3 text-slate-800 shadow-inner">
+                <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold">
+                  <Ban className="w-4 h-4 text-slate-600 shrink-0" />
+                  <span>🚫 Vous avez bloqué cette conversation</span>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Cancel Button */}
                 <button
                   type="button"
-                  onClick={cancelRecording}
-                  className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full text-gray-500 hover:text-red-500 hover:bg-red-50 transition-colors flex items-center justify-center cursor-pointer"
-                  title="Supprimer l'enregistrement"
+                  onClick={handleUnblock}
+                  className="px-4 py-2 bg-[#0A3D8F] text-white rounded-xl text-xs font-bold hover:bg-[#082e6d] transition-all cursor-pointer shadow-md active:scale-95 shrink-0"
                 >
-                  <Trash2 className="w-5 h-5" />
+                  Débloquer
                 </button>
-
-                {/* Stop & Send Button */}
+              </div>
+            ) : (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-3 sm:p-4 flex items-center justify-center gap-2 text-red-700 text-xs sm:text-sm font-semibold text-center shadow-xs">
+                <Ban className="w-4 h-4 text-red-500 shrink-0" />
+                <span>🚫 Vous avez été bloqué par cette officine</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Quick Suggestions Chips */}
+            <div className="px-3 pt-1.5 pb-1 flex items-center gap-2 overflow-x-auto no-scrollbar max-w-5xl mx-auto w-full">
+              {quickChips.map((chip, idx) => (
                 <button
-                  type="button"
-                  onClick={stopAndSendRecording}
-                  className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-[#0A3D8F] hover:bg-[#082e6d] text-white flex items-center justify-center shadow-md active:scale-95 transition-all cursor-pointer"
-                  title="Envoyer le message vocal"
+                  key={idx}
+                  onClick={() => handleSendText(chip)}
+                  className="whitespace-nowrap px-3 py-1 rounded-full bg-white hover:bg-gray-50 text-[#111b21] border border-gray-300 text-xs font-medium transition-colors cursor-pointer shrink-0 shadow-2xs"
                 >
-                  <Send className="w-5 h-5 fill-current" />
+                  {chip}
                 </button>
-              </div>
+              ))}
             </div>
-          ) : (
-            <div className="flex items-end gap-1 sm:gap-2">
-              {/* 1. [🎤 micro - navigator.mediaDevices] */}
-              <button
-                type="button"
-                onMouseDown={handleRecordMouseDown}
-                onMouseUp={handleRecordMouseUp}
-                onTouchStart={handleRecordTouchStart}
-                onTouchEnd={handleRecordTouchEnd}
-                onClick={() => {
-                  if (!isHoldingRecordRef.current) {
-                    if (isRecording) stopAndSendRecording();
-                    else startRecording();
-                  }
-                }}
-                className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-blue-50 active:bg-blue-100 flex items-center justify-center shrink-0 transition-colors cursor-pointer"
-                title="Maintenir pour enregistrer un message vocal (Micro)"
-              >
-                <Mic className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2]" />
-              </button>
 
-              {/* 2. [🖼️ Galerie - input accept="image/*"] */}
-              <button
-                type="button"
-                onClick={handleOpenGallery}
-                className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-blue-50 flex items-center justify-center shrink-0 transition-colors cursor-pointer"
-                title="Galerie photo"
-              >
-                <ImageIcon className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2]" />
-              </button>
+            <div className="p-2 pt-0 max-w-5xl mx-auto w-full">
+              {/* Microphone Permission Toast Banner */}
+              {micPermissionError && (
+                <div className="mb-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between gap-2 shadow-sm animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <Mic className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span className="font-medium">{micPermissionError}</span>
+                  </div>
+                  <button
+                    onClick={() => setMicPermissionError(null)}
+                    className="p-1 text-amber-700 hover:text-amber-900 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
 
-              {/* 3. [📍 Position GPS - navigator.geolocation] */}
-              <button
-                type="button"
-                disabled={isLocating}
-                onClick={handleSendLocation}
-                className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-blue-50 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-50"
-                title="Envoyer ma position GPS"
-              >
-                <MapPin className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2]" />
-              </button>
+              {/* Hidden File Inputs */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*,.pdf,.doc,.docx"
+                onChange={handleFileSelected}
+                className="hidden"
+              />
+              <input
+                type="file"
+                ref={cameraInputRef}
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileSelected}
+                className="hidden"
+              />
 
-              {/* 4. [input text "Message"] : rounded-full, min-h-[44px] */}
-              <div className="flex-1 bg-white rounded-full border border-gray-300 focus-within:border-[#0A3D8F] shadow-xs px-3 sm:px-4 py-1.5 flex items-center transition-colors min-h-[44px]">
-                <textarea
-                  ref={textareaRef}
-                  value={inputText}
-                  onChange={handleTextareaChange}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Message"
-                  rows={1}
-                  className="w-full bg-transparent text-[#111b21] text-sm md:text-base resize-none focus:outline-none placeholder:text-gray-500 max-h-28 overflow-y-auto leading-relaxed py-1"
-                />
-              </div>
+              {/* Live Audio Recording Display */}
+              {isRecording ? (
+                <div className="flex items-center justify-between gap-3 bg-white px-3 py-2 rounded-full border border-red-200 shadow-inner min-h-[44px]">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3 h-3 rounded-full bg-red-500 animate-ping ml-1" />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-red-600 flex items-center gap-1">
+                        Enregistrement vocal ({recordingSeconds}s)
+                      </span>
+                      <span className="text-[10px] text-gray-500">
+                        Relâchez ou cliquez pour envoyer
+                      </span>
+                    </div>
+                  </div>
 
-              {/* 5. [➤ envoyer] */}
-              <button
-                type="button"
-                disabled={!inputText.trim() || isSending}
-                onClick={() => handleSendText()}
-                className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full bg-[#0A3D8F] hover:bg-[#082e6d] disabled:opacity-40 disabled:hover:bg-[#0A3D8F] text-white flex items-center justify-center shrink-0 shadow-md transition-all active:scale-95 cursor-pointer"
-                title="Envoyer"
-              >
-                <Send className="w-5 h-5 fill-current" />
-              </button>
+                  <div className="flex items-center gap-2">
+                    {/* Cancel Button */}
+                    <button
+                      type="button"
+                      onClick={cancelRecording}
+                      className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full text-gray-500 hover:text-red-500 hover:bg-red-50 transition-colors flex items-center justify-center cursor-pointer"
+                      title="Supprimer l'enregistrement"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+
+                    {/* Stop & Send Button */}
+                    <button
+                      type="button"
+                      onClick={stopAndSendRecording}
+                      className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-[#0A3D8F] hover:bg-[#082e6d] text-white flex items-center justify-center shadow-md active:scale-95 transition-all cursor-pointer"
+                      title="Envoyer le message vocal"
+                    >
+                      <Send className="w-5 h-5 fill-current" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-end gap-1 sm:gap-2">
+                  {/* 1. [🎤 micro - navigator.mediaDevices] */}
+                  <button
+                    type="button"
+                    onMouseDown={handleRecordMouseDown}
+                    onMouseUp={handleRecordMouseUp}
+                    onTouchStart={handleRecordTouchStart}
+                    onTouchEnd={handleRecordTouchEnd}
+                    onClick={() => {
+                      if (!isHoldingRecordRef.current) {
+                        if (isRecording) stopAndSendRecording();
+                        else startRecording();
+                      }
+                    }}
+                    className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-blue-50 active:bg-blue-100 flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                    title="Maintenir pour enregistrer un message vocal (Micro)"
+                  >
+                    <Mic className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2]" />
+                  </button>
+
+                  {/* 2. [🖼️ Galerie - input accept="image/*"] */}
+                  <button
+                    type="button"
+                    onClick={handleOpenGallery}
+                    className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-blue-50 flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                    title="Galerie photo"
+                  >
+                    <ImageIcon className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2]" />
+                  </button>
+
+                  {/* 3. [📍 Position GPS - navigator.geolocation] */}
+                  <button
+                    type="button"
+                    disabled={isLocating}
+                    onClick={handleSendLocation}
+                    className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full text-gray-600 hover:text-[#0A3D8F] hover:bg-blue-50 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+                    title="Envoyer ma position GPS"
+                  >
+                    <MapPin className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2]" />
+                  </button>
+
+                  {/* 4. [input text "Message"] : rounded-full, min-h-[44px] */}
+                  <div className="flex-1 bg-white rounded-full border border-gray-300 focus-within:border-[#0A3D8F] shadow-xs px-3 sm:px-4 py-1.5 flex items-center transition-colors min-h-[44px]">
+                    <textarea
+                      ref={textareaRef}
+                      value={inputText}
+                      onChange={handleTextareaChange}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Message"
+                      rows={1}
+                      className="w-full bg-transparent text-[#111b21] text-sm md:text-base resize-none focus:outline-none placeholder:text-gray-500 max-h-28 overflow-y-auto leading-relaxed py-1"
+                    />
+                  </div>
+
+                  {/* 5. [➤ envoyer] */}
+                  <button
+                    type="button"
+                    disabled={!inputText.trim() || isSending}
+                    onClick={() => handleSendText()}
+                    className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full bg-[#0A3D8F] hover:bg-[#082e6d] disabled:opacity-40 disabled:hover:bg-[#0A3D8F] text-white flex items-center justify-center shrink-0 shadow-md transition-all active:scale-95 cursor-pointer"
+                    title="Envoyer"
+                  >
+                    <Send className="w-5 h-5 fill-current" />
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
       {/* 4. PHOTO PREVIEW MODAL (preview avant envoi) */}
@@ -1068,6 +1223,105 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
             alt="Plein écran"
             className="max-h-[90vh] max-w-full rounded-xl object-contain"
           />
+        </div>
+      )}
+
+      {/* 5. MODALE DE BLOCAGE & SIGNALEMENT */}
+      {showBlockModal && (
+        <div className="fixed inset-0 z-[110] bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-900 animate-in fade-in zoom-in-95 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-lg ${
+                    blockMode === 'report'
+                      ? 'bg-red-100 text-red-600'
+                      : 'bg-amber-100 text-amber-700'
+                  }`}
+                >
+                  {blockMode === 'report' ? (
+                    <ShieldAlert className="w-5 h-5" />
+                  ) : (
+                    <Ban className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    {blockMode === 'report'
+                      ? 'Signaler et Bloquer'
+                      : 'Bloquer la pharmacie'}
+                  </h3>
+                  <p className="text-xs text-slate-500">{pharmacy.nom}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBlockModal(false)}
+                className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-700 block">
+                Motif du blocage :
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Spam', 'Harcèlement', 'Injures', 'Autre'].map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => setBlockReason(reason)}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-left transition-all cursor-pointer ${
+                      blockReason === reason
+                        ? 'border-red-500 bg-red-50 text-red-700 ring-2 ring-red-400/20'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+
+              {blockMode === 'report' && (
+                <div className="space-y-1 pt-1">
+                  <label className="text-xs font-bold text-slate-700 block">
+                    Détails du signalement (optionnel) :
+                  </label>
+                  <textarea
+                    value={blockDescription}
+                    onChange={(e) => setBlockDescription(e.target.value)}
+                    placeholder="Précisez le problème rencontré (ex: propos déplacés, refus injustifié...)"
+                    rows={3}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBlockModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBlock}
+                className={`px-5 py-2.5 rounded-xl text-xs font-extrabold text-white shadow-md active:scale-95 transition-all cursor-pointer ${
+                  blockMode === 'report'
+                    ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20'
+                    : 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'
+                }`}
+              >
+                {blockMode === 'report'
+                  ? 'Signaler et Bloquer'
+                  : 'Confirmer le blocage'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

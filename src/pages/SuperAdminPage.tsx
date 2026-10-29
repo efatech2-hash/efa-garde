@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pharmacie } from '../types';
+import { Pharmacie, Signalement, Message } from '../types';
 import {
   loadPharmacies,
   savePharmacies,
@@ -8,6 +8,10 @@ import {
   getSupabaseClient,
   fetchPharmacies,
   activateSubscriptionInDB,
+  loadSignalements,
+  updateSignalementStatus,
+  loadMessages,
+  unblockConversation,
 } from '../services/store';
 import { checkRateLimit } from '../utils/security';
 import { Logo } from '../components/Logo';
@@ -34,6 +38,11 @@ import {
   Filter,
   Eye,
   EyeOff,
+  ShieldAlert,
+  MessageSquare,
+  Ban,
+  Unlock,
+  X,
 } from 'lucide-react';
 
 const SUPER_ADMIN_TOKEN_KEY = 'super_admin_token';
@@ -114,6 +123,9 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   const [showGatePassword, setShowGatePassword] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
 
+  // Navigation Onglets Super Admin ('pharmacies' | 'signalements')
+  const [activeTab, setActiveTab] = useState<'pharmacies' | 'signalements'>('pharmacies');
+
   // Pharmacy Data
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
   const [searchTerm, setSearchTerm] = useState('');
@@ -122,17 +134,73 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   const [selectedPharmaForModal, setSelectedPharmaForModal] = useState<Pharmacie | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // Signalements & Modération Data
+  const [signalements, setSignalements] = useState<Signalement[]>(() => loadSignalements());
+  const [signalementFilter, setSignalementFilter] = useState<'all' | 'pending' | 'resolved' | 'ignored' | 'banned'>('pending');
+  const [inspectConvoModal, setInspectConvoModal] = useState<{
+    conversationId: string;
+    messages: Message[];
+    signalement: Signalement;
+  } | null>(null);
+
+  const refreshSignalements = async () => {
+    try {
+      const client = getSupabaseClient();
+      if (client) {
+        const { data } = await client
+          .from('signalements')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (data && data.length > 0) {
+          setSignalements(data);
+          localStorage.setItem('efa_signalements', JSON.stringify(data));
+          return;
+        }
+      }
+    } catch {}
+    setSignalements(loadSignalements());
+  };
+
   // Listen to store updates
   useEffect(() => {
     const unsub = subscribeToStore(() => {
       setPharmacies(loadPharmacies());
+      refreshSignalements();
     });
+    refreshSignalements();
     return () => unsub();
   }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleForceUnblock = (s: Signalement) => {
+    updateSignalementStatus(s.id, 'resolved', s.conversation_id);
+    refreshSignalements();
+    showToast(`🔓 Conversation débloquée et signalement résolu`);
+  };
+
+  const handleBan = (s: Signalement) => {
+    updateSignalementStatus(s.id, 'banned');
+    refreshSignalements();
+    showToast(`🚫 Utilisateur banni et bloqué`);
+  };
+
+  const handleIgnore = (s: Signalement) => {
+    updateSignalementStatus(s.id, 'ignored');
+    refreshSignalements();
+    showToast(`Signalement classé sans suite`);
+  };
+
+  const handleInspectConvo = (s: Signalement) => {
+    const msgs = loadMessages(s.conversation_id);
+    setInspectConvoModal({
+      conversationId: s.conversation_id,
+      messages: msgs,
+      signalement: s,
+    });
   };
 
   const handleGateLogin = async (e: React.FormEvent) => {
@@ -351,6 +419,14 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     return true;
   });
 
+  // Computed Signalements stats
+  const pendingSignalementsCount = signalements.filter((s) => s.status === 'pending').length;
+
+  const filteredSignalements = signalements.filter((s) => {
+    if (signalementFilter === 'all') return true;
+    return s.status === signalementFilter;
+  });
+
   // Helper formatting subscription end date
   const formatSubscriptionEnd = (p: Pharmacie) => {
     const rawEnd = p.subscription_end_at || p.subscription_end;
@@ -521,7 +597,41 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
-        {/* STATS EN HAUT : Total, Actifs, Inactifs */}
+        {/* ONGLET SELECTOR */}
+        <div className="flex items-center gap-3 border-b border-slate-800 pb-3 flex-wrap">
+          <button
+            onClick={() => setActiveTab('pharmacies')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'pharmacies'
+                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Gestion Pharmacies ({totalCount})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('signalements')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'signalements'
+                ? 'bg-red-600 text-white shadow-lg shadow-red-500/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4 text-red-400" />
+            <span>Signalements & Modération</span>
+            {pendingSignalementsCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[11px] font-black animate-pulse shadow-sm">
+                {pendingSignalementsCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'pharmacies' ? (
+          <>
+            {/* STATS EN HAUT : Total, Actifs, Inactifs */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           {/* Total */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg flex items-center justify-between">
@@ -861,7 +971,350 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
             </div>
           )}
         </div>
+      </>
+    ) : (
+          <div className="space-y-6 animate-in fade-in">
+            {/* SIGNALEMENTS STATS */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 sm:gap-4">
+              <div className="bg-slate-900 border border-red-500/30 rounded-3xl p-5 shadow-lg flex items-center justify-between bg-gradient-to-br from-slate-900 to-red-950/20">
+                <div>
+                  <span className="text-xs uppercase font-extrabold text-red-400 tracking-wider">
+                    En attente
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-black text-white mt-1">
+                    {pendingSignalementsCount}
+                  </div>
+                  <span className="text-[11px] text-red-300/80">
+                    Nécessitent une modération
+                  </span>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center font-bold text-xl border border-red-500/30">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-5 shadow-lg flex items-center justify-between">
+                <div>
+                  <span className="text-xs uppercase font-extrabold text-emerald-400 tracking-wider">
+                    Résolus / Débloqués
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-black text-emerald-300 mt-1">
+                    {signalements.filter((s) => s.status === 'resolved').length}
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    Conversations rétablies
+                  </span>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-xl border border-emerald-500/20">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg flex items-center justify-between">
+                <div>
+                  <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
+                    Bannis
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-black text-rose-400 mt-1">
+                    {signalements.filter((s) => s.status === 'banned').length}
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    Sanctionnés
+                  </span>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 flex items-center justify-center font-bold text-xl border border-rose-500/20">
+                  <Ban className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg flex items-center justify-between">
+                <div>
+                  <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
+                    Total Signalements
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-black text-white mt-1">
+                    {signalements.length}
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    Historique modération
+                  </span>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-xl border border-slate-700">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+              </div>
+            </div>
+
+            {/* FILTER BAR FOR SIGNALEMENTS */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2">
+                  Statut :
+                </span>
+                {(['pending', 'all', 'resolved', 'ignored', 'banned'] as const).map((st) => {
+                  const labels: Record<string, string> = {
+                    pending: 'En attente',
+                    all: 'Tous',
+                    resolved: 'Résolus',
+                    ignored: 'Ignorés',
+                    banned: 'Bannis',
+                  };
+                  const active = signalementFilter === st;
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setSignalementFilter(st)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        active
+                          ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                          : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750'
+                      }`}
+                    >
+                      {labels[st]}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={refreshSignalements}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer border border-slate-700"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Actualiser</span>
+              </button>
+            </div>
+
+            {/* TABLE / LIST OF SIGNALEMENTS */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-xl overflow-hidden">
+              {filteredSignalements.length === 0 ? (
+                <div className="py-16 text-center text-slate-500 space-y-2">
+                  <ShieldCheck className="w-12 h-12 mx-auto text-slate-600 mb-2" />
+                  <p className="text-sm font-semibold">Aucun signalement dans cette vue</p>
+                  <p className="text-xs text-slate-600">Aucun litige ou harcèlement en attente de modération.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs sm:text-sm">
+                    <thead className="bg-slate-950 text-slate-400 text-[11px] uppercase font-mono tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="py-3.5 px-4 font-bold">Date</th>
+                        <th className="py-3.5 px-4 font-bold">Parties</th>
+                        <th className="py-3.5 px-4 font-bold">Motif & Détails</th>
+                        <th className="py-3.5 px-4 font-bold">Statut</th>
+                        <th className="py-3.5 px-4 font-bold text-right">Actions Modération</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-sans">
+                      {filteredSignalements.map((s) => {
+                        const dateFormatted = new Date(s.created_at).toLocaleString('fr-FR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+
+                        return (
+                          <tr key={s.id} className="hover:bg-slate-850/50 transition-colors">
+                            <td className="py-3.5 px-4 font-mono text-xs text-slate-400 whitespace-nowrap">
+                              {dateFormatted}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="space-y-0.5">
+                                <p className="font-bold text-white text-xs">
+                                  Émetteur : <span className="text-amber-300">{s.reporter_id.startsWith('client') ? `Client #${s.reporter_id.replace('client-', '')}` : s.pharmacy_nom || 'Pharmacie'}</span>
+                                </p>
+                                <p className="text-[11px] text-slate-400">
+                                  Signalé : <span className="text-slate-300">{s.reported_id.startsWith('client') ? `Client #${s.reported_id.replace('client-', '')}` : s.pharmacy_nom || s.reported_id}</span>
+                                </p>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="space-y-1">
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  s.reason === 'Harcèlement'
+                                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                    : s.reason === 'Injures'
+                                    ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                                    : s.reason === 'Spam'
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                    : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                }`}>
+                                  {s.reason}
+                                </span>
+                                {s.description && (
+                                  <p className="text-xs text-slate-300 italic max-w-xs break-words">
+                                    "{s.description}"
+                                  </p>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                                s.status === 'pending'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                                  : s.status === 'resolved'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                  : s.status === 'banned'
+                                  ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                                  : 'bg-slate-800 text-slate-400 border border-slate-700'
+                              }`}>
+                                {s.status === 'pending'
+                                  ? 'En attente'
+                                  : s.status === 'resolved'
+                                  ? 'Résolu'
+                                  : s.status === 'banned'
+                                  ? 'Banni'
+                                  : 'Ignoré'}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                <button
+                                  onClick={() => handleInspectConvo(s)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                                  title="Inspecter l'historique complet de la discussion"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>Voir convo</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleForceUnblock(s)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                                  title="Forcer le déblocage et marquer résolu"
+                                >
+                                  <Unlock className="w-3.5 h-3.5" />
+                                  <span>Forcer Débloquer</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleBan(s)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-500/30 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                                  title="Bannir l'auteur signalé"
+                                >
+                                  <Ban className="w-3.5 h-3.5" />
+                                  <span>Bannir</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleIgnore(s)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-white border border-slate-700 text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                                  title="Classer sans suite"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                  <span>Ignorer</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* Modal d'inspection de la conversation pour modération Super Admin */}
+      {inspectConvoModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl flex flex-col max-h-[85vh] text-slate-100 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-base">
+                    Inspection de la conversation
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Signalement : <span className="text-amber-300 font-bold">{inspectConvoModal.signalement.reason}</span> • ID {inspectConvoModal.conversationId}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectConvoModal(null)}
+                className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950/70 rounded-2xl my-3 border border-slate-800/80">
+              {inspectConvoModal.messages.length === 0 ? (
+                <p className="text-center text-slate-500 text-xs py-10">
+                  Aucun message enregistré dans cette conversation.
+                </p>
+              ) : (
+                inspectConvoModal.messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`flex flex-col ${
+                      m.sender === 'pharma' ? 'items-end' : 'items-start'
+                    }`}
+                  >
+                    <div
+                      className={`max-w-[85%] rounded-2xl p-3 text-xs ${
+                        m.sender === 'pharma'
+                          ? 'bg-[#0A3D8F] text-white'
+                          : 'bg-slate-800 text-slate-100 border border-slate-700'
+                      }`}
+                    >
+                      <div className="text-[10px] font-bold opacity-75 mb-1 flex items-center gap-1.5">
+                        <span>{m.sender === 'pharma' ? '🏥 Officine' : '👤 Patient'}</span>
+                        <span>•</span>
+                        <span>{new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      {m.type === 'image' && m.media_url && (
+                        <img
+                          src={m.media_url}
+                          alt="Photo jointe"
+                          className="max-h-48 rounded-lg mb-1 object-cover"
+                        />
+                      )}
+                      {m.type === 'audio' && m.media_url && (
+                        <div className="p-2 rounded bg-black/20 text-[11px] font-mono">
+                          🎤 Message vocal ({m.audio_duration || 0}s)
+                        </div>
+                      )}
+                      <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex items-center justify-between border-t border-slate-800 pt-3 flex-wrap gap-2">
+              <span className="text-xs text-slate-400">
+                {inspectConvoModal.messages.length} message(s) inspecté(s)
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    handleForceUnblock(inspectConvoModal.signalement);
+                    setInspectConvoModal(null);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md"
+                >
+                  Débloquer la conversation
+                </button>
+                <button
+                  onClick={() => setInspectConvoModal(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-white text-xs font-bold cursor-pointer"
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal d'activation abonnement direct en DB */}
       <ActivateSubscriptionModal

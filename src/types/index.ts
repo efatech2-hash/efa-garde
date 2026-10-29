@@ -86,21 +86,49 @@ export interface Garde {
 export interface Conversation {
   id: string;
   client_id: string;
-  pharmacie_id: string;
+  pharmacy_id: string;
+  pharmacy_user_id?: string;
   last_message?: string;
+  last_message_at?: string;
+  unread_count_pharmacy?: number;
+  unread_count_client?: number;
+  is_blocked?: boolean;
+  blocked_by?: string;
+  blocked_by_type?: 'pharmacy' | 'client';
+  blocked_at?: string;
+  is_reported?: boolean;
   updated_at?: string;
+  created_at?: string;
 }
 
 export interface Message {
   id: string;
   conversation_id: string;
+  sender_id?: string;
+  receiver_id?: string;
+  sender_type?: 'client' | 'pharma' | 'system';
   sender: 'client' | 'pharma';
+  content?: string;
   text: string;
+  is_read?: boolean;
   created_at: string;
   expires_at?: string; // created_at + 24h (suppression automatique 24h)
   type?: 'text' | 'image' | 'audio';
   media_url?: string;
   audio_duration?: number;
+}
+
+export interface Signalement {
+  id: string;
+  conversation_id: string;
+  reporter_id: string;
+  reported_id: string;
+  reason: 'Spam' | 'Harcèlement' | 'Injures' | 'Autre' | string;
+  description?: string;
+  status: 'pending' | 'resolved' | 'ignored' | 'banned';
+  created_at: string;
+  pharmacy_nom?: string;
+  client_nom?: string;
 }
 
 export interface PresenceState {
