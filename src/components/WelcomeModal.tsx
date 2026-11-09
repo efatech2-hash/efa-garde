@@ -33,21 +33,21 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         </div>
 
         {/* Actions */}
-        <div className="pt-2 space-y-1">
-          {/* BTN OUI (vert grand pulse) */}
+        <div className="pt-2 space-y-3">
+          {/* BTN CLIENT */}
           <button
             onClick={onSelectClient}
-            className="bg-green-500 hover:bg-green-600 active:scale-[0.98] text-white text-lg font-bold py-4 w-full animate-pulse rounded-xl shadow-lg shadow-green-500/30 transition-all cursor-pointer block"
+            className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white text-base sm:text-lg font-bold py-4 w-full rounded-xl shadow-lg shadow-emerald-600/30 transition-all cursor-pointer block"
           >
-            Oui, je suis client(e)
+            Je suis Client
           </button>
 
-          {/* BTN NON (rouge petit) */}
+          {/* BTN PHARMACIEN */}
           <button
             onClick={onSelectPharma}
-            className="bg-red-100 hover:bg-red-200 active:scale-[0.98] text-red-600 text-sm font-semibold py-2 w-full rounded-xl transition-all cursor-pointer mt-4 block"
+            className="bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-slate-200 hover:text-white border border-slate-700 text-sm sm:text-base font-semibold py-3.5 w-full rounded-xl transition-all cursor-pointer block"
           >
-            Non, je suis pharmacie
+            Je suis Pharmacien
           </button>
         </div>
       </div>

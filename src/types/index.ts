@@ -144,3 +144,23 @@ export interface PharmacyDailyStat {
   client_count: number;
 }
 
+export interface Client {
+  id: string;
+  nom: string;
+  numero_whatsapp: string;
+  date_inscription: string;
+}
+
+export interface Abonnement {
+  id: string;
+  entreprise_id?: string;
+  pharmacie_id: string;
+  plan: string;
+  statut: string;
+  montant?: number;
+  date_debut?: string;
+  expire_le: string;
+  created_at?: string;
+  updated_at?: string;
+}
+

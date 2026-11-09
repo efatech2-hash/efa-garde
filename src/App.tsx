@@ -14,6 +14,7 @@ import { getSession, clearSession, setSession } from './lib/auth';
 import { Map } from './pages/Map';
 import { DashboardPharma } from './pages/DashboardPharma';
 import { PharmacienLoginPage } from './pages/PharmacienLoginPage';
+import { AuthClient } from './pages/AuthClient';
 import { ClientChatPage } from './pages/ClientChatPage';
 import { PharmaInboxPage } from './pages/PharmaInboxPage';
 import { SubscriptionPage } from './pages/SubscriptionPage';
@@ -281,6 +282,7 @@ export default function App() {
     // Ne jamais auto-rediriger si l'utilisateur accède directement à Super Admin (/super/admin ou /efa-admin) ou aux pages publiques
     if (
       isSuperAdminRoute(activeRoute) ||
+      activeRoute === '/client/login' ||
       activeRoute === '/pharma/login' ||
       activeRoute === '/login' ||
       activeRoute === '/connexion' ||
@@ -397,17 +399,27 @@ export default function App() {
 
   // 1. WELCOME MODAL ACTIONS
   const handleWelcomeSelectClient = () => {
-    localStorage.setItem('role', 'client');
-    localStorage.setItem('efa_garde_role', 'client');
-    const guestSession = {
-      role: 'client' as const,
-      phone: 'Client Lomé',
-      createdAt: new Date().toISOString(),
-    };
-    setSession(guestSession);
-    setLocalSession(guestSession);
     setShowWelcomeModal(false);
-    navigateTo('/client');
+    const existingNom = localStorage.getItem('efa_client_nom');
+    const existingPhone = localStorage.getItem('efa_client_whatsapp');
+
+    if (existingNom && existingPhone) {
+      // Déjà inscrit : entrée directe sans ressaisir
+      localStorage.setItem('role', 'client');
+      localStorage.setItem('efa_garde_role', 'client');
+      const s = {
+        role: 'client' as const,
+        phone: existingPhone,
+        pharmacieNom: existingNom,
+        createdAt: new Date().toISOString(),
+      };
+      setSession(s);
+      setLocalSession(s);
+      navigateTo('/client');
+    } else {
+      // Premier accès client : formulaire d'inscription Nom + WhatsApp
+      navigateTo('/client/login');
+    }
   };
 
   const handleWelcomeSelectPharma = () => {
@@ -617,6 +629,24 @@ export default function App() {
         />
       );
     }
+  } else if (
+    currentPath === '/client/login' ||
+    currentPath === '/client-login' ||
+    currentPath === '/auth/client'
+  ) {
+    content = (
+      <AuthClient
+        onSuccess={() => {
+          const s = getSession();
+          setLocalSession(s);
+          navigateTo('/client');
+        }}
+        onBackToRoles={() => {
+          setShowWelcomeModal(true);
+          navigateTo('/');
+        }}
+      />
+    );
   } else if (
     currentPath === '/pharma/login' ||
     currentPath === '/login' ||

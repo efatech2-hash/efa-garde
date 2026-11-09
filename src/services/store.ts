@@ -1,6 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Pharmacie, Garde, Conversation, Message, PresenceState, PlanType, PharmaciePending, Pub, PharmacyDailyStat, Signalement } from '../types';
-import { INITIAL_PHARMACIES, INITIAL_PUBS } from './seedData';
+import { Pharmacie, Garde, Conversation, Message, PresenceState, PlanType, PharmaciePending, Pub, PharmacyDailyStat, Signalement, Client, Abonnement } from '../types';
 import { supabase } from '../lib/supabase';
 import { validateUploadedFile } from '../utils/security';
 
@@ -100,46 +99,21 @@ export function loadPharmacies(): Pharmacie[] {
     const raw = localStorage.getItem(LOCAL_STORAGE_PHARMACIES);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         const uniqueMap = new Map<string, Pharmacie>();
         for (const p of parsed) {
           if (!p || !p.id) continue;
-          if (uniqueMap.has(p.id)) continue; // ignore duplicate keys
-
-          const seed = INITIAL_PHARMACIES.find((ip) => ip.id === p.id || ip.nom === p.nom);
-          let lat = seed ? seed.lat : p.lat;
-          let lng = seed ? seed.lng : p.lng;
-
-          if (!lat || !lng || isNaN(lat) || isNaN(lng) || lat < 6.12) {
-            console.warn(`[Geo] Coordonnées dans l'océan ou invalides pour ${p.nom}, repositionnement à Lomé`);
-            lat = seed?.lat || 6.1319;
-            lng = seed?.lng || 1.2228;
-          }
-
-          uniqueMap.set(p.id, {
-            ...p,
-            nom: seed?.nom || p.nom,
-            adresse: seed?.adresse || p.adresse,
-            lat,
-            lng,
-          });
+          if (uniqueMap.has(p.id)) continue;
+          uniqueMap.set(p.id, p);
         }
         const result = Array.from(uniqueMap.values());
-        const sorted = sortPharmaciesPriority(result);
-        // Clean localStorage if duplicates were present
-        if (sorted.length !== parsed.length) {
-          localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(sorted));
-        }
-        return sorted;
+        return sortPharmaciesPriority(result);
       }
     }
   } catch {
     // ignore
   }
-  // Initialize with seed data
-  const initialSorted = sortPharmaciesPriority(INITIAL_PHARMACIES);
-  localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(initialSorted));
-  return initialSorted;
+  return [];
 }
 
 export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
@@ -293,6 +267,20 @@ export async function activateSubscriptionInDB(
       if (error) {
         console.warn('[EFA GARDE] Error updating pharmacy subscription in DB:', error);
       }
+
+      // Synchronisation table abonnements
+      await client
+        .from('abonnements')
+        .insert({
+          entreprise_id: pharmacyId,
+          pharmacie_id: pharmacyId,
+          plan: updates.plan || 'populaire_mensuel',
+          statut: 'actif',
+          montant: updates.prix || 15000,
+          date_debut: now.toISOString(),
+          expire_le: end.toISOString(),
+        })
+        .then(() => {}, () => {});
     }
   } catch (err) {
     console.warn('[EFA GARDE] Failed to update DB:', err);
@@ -301,6 +289,203 @@ export async function activateSubscriptionInDB(
   const updated = updatePharmacySuperAdmin(pharmacyId, updates);
   notifyChange();
   return updated;
+}
+
+/* =========================================================
+   SYNCHRONISATION DES 6 TABLES SUPABASE
+   abonnements, conversations, messages, pharmacies, utilisateurs, clients
+   ========================================================= */
+
+const LOCAL_STORAGE_CLIENTS = 'efa_clients_v1';
+
+export function loadClients(): Client[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_CLIENTS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function saveClients(clients: Client[]): void {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_CLIENTS, JSON.stringify(clients));
+    notifyChange();
+  } catch {}
+}
+
+/**
+ * Enregistrement direct d'un client dans la table Supabase `clients` et localement.
+ * Idéal pour les statistiques de fréquentation globale de l'app.
+ */
+export async function registerClientInDB(data: {
+  nom: string;
+  numero_whatsapp: string;
+}): Promise<Client> {
+  const cleanNom = data.nom.trim();
+  const cleanPhone = data.numero_whatsapp.trim().replace(/\s+/g, '');
+  const now = new Date().toISOString();
+  const clientId =
+    localStorage.getItem('efa_client_id') ||
+    'cli-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+
+  const clientObj: Client = {
+    id: clientId,
+    nom: cleanNom,
+    numero_whatsapp: cleanPhone,
+    date_inscription: now,
+  };
+
+  // Cache local
+  localStorage.setItem('efa_client_id', clientId);
+  localStorage.setItem('efa_client_nom', cleanNom);
+  localStorage.setItem('efa_client_whatsapp', cleanPhone);
+
+  const list = loadClients().filter((c) => c.numero_whatsapp !== cleanPhone && c.id !== clientId);
+  list.unshift(clientObj);
+  saveClients(list);
+
+  // Synchronisation Supabase table clients
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      await sb
+        .from('clients')
+        .upsert({
+          id: clientObj.id,
+          nom: clientObj.nom,
+          numero_whatsapp: clientObj.numero_whatsapp,
+          date_inscription: clientObj.date_inscription,
+        })
+        .then(() => {}, () => {});
+
+      // Synchronisation table utilisateurs
+      await sb
+        .from('utilisateurs')
+        .upsert({
+          nom: clientObj.nom,
+          role: 'client',
+          telephone: clientObj.numero_whatsapp,
+        })
+        .then(() => {}, () => {});
+    }
+  } catch (err) {
+    console.warn('registerClientInDB fallback:', err);
+  }
+
+  notifyChange();
+  return clientObj;
+}
+
+/**
+ * Récupère le nombre total de clients enregistrés depuis Supabase
+ */
+export async function fetchClientsCount(): Promise<number> {
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { count, error } = await sb
+        .from('clients')
+        .select('*', { count: 'exact', head: true });
+      if (!error && typeof count === 'number') {
+        return count;
+      }
+    }
+  } catch {}
+  return loadClients().length;
+}
+
+/**
+ * Récupère les abonnements récents depuis la table Supabase `abonnements`
+ */
+export async function fetchAbonnements(pharmacieId?: string): Promise<Abonnement[]> {
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      let query = sb
+        .from('abonnements')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (pharmacieId) {
+        query = query.eq('pharmacie_id', pharmacieId);
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        return data as Abonnement[];
+      }
+    }
+  } catch (err) {
+    console.warn('fetchAbonnements error:', err);
+  }
+  return [];
+}
+
+/**
+ * Synchronise les conversations depuis Supabase
+ */
+export async function fetchConversations(
+  pharmacieId?: string,
+  clientId?: string
+): Promise<Conversation[]> {
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      let query = sb
+        .from('conversations')
+        .select('*')
+        .order('last_message_at', { ascending: false });
+
+      if (pharmacieId) {
+        query = query.eq('pharmacy_id', pharmacieId);
+      }
+      if (clientId) {
+        query = query.eq('client_id', clientId);
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        const convs = data as Conversation[];
+        saveConversations(convs);
+        return convs;
+      }
+    }
+  } catch (err) {
+    console.warn('fetchConversations error:', err);
+  }
+  return loadConversations(pharmacieId, clientId);
+}
+
+/**
+ * Synchronise les messages d'une conversation depuis Supabase
+ */
+export async function fetchMessages(conversationId: string): Promise<Message[]> {
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { data, error } = await sb
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      if (!error && Array.isArray(data)) {
+        const msgs = (data as Message[]).filter((m) => !isMessageExpired(m));
+        const raw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
+        const all: Record<string, Message[]> = raw ? JSON.parse(raw) : {};
+        all[conversationId] = msgs;
+        localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
+        notifyChange();
+        return msgs;
+      }
+    }
+  } catch (err) {
+    console.warn('fetchMessages error:', err);
+  }
+  return loadMessages(conversationId);
 }
 
 export async function fetchPharmacyById(id: string): Promise<Pharmacie | null> {
@@ -327,33 +512,7 @@ export async function fetchPharmacyById(id: string): Promise<Pharmacie | null> {
 export function loadGardes(pharmacieId?: string): Garde[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_GARDES);
-    let all: Garde[] = raw ? JSON.parse(raw) : [];
-    if (!raw) {
-      // Seed initial gardes for testing
-      const now = new Date();
-      const nextWeek = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
-      all = [
-        {
-          id: 'garde-1',
-          pharmacie_id: 'pharma-1',
-          date_debut: now.toISOString(),
-          date_fin: nextWeek.toISOString(),
-        },
-        {
-          id: 'garde-2',
-          pharmacie_id: 'pharma-2',
-          date_debut: now.toISOString(),
-          date_fin: nextWeek.toISOString(),
-        },
-        {
-          id: 'garde-3',
-          pharmacie_id: 'pharma-5',
-          date_debut: now.toISOString(),
-          date_fin: nextWeek.toISOString(),
-        }
-      ];
-      localStorage.setItem(LOCAL_STORAGE_GARDES, JSON.stringify(all));
-    }
+    const all: Garde[] = raw ? JSON.parse(raw) : [];
     if (pharmacieId) {
       return all.filter(g => g.pharmacie_id === pharmacieId);
     }
@@ -418,30 +577,11 @@ export function loadConversations(
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_CONVERSATIONS);
     let all: Conversation[] = raw ? JSON.parse(raw) : [];
-    if (!raw || all.length === 0) {
-      const now = new Date().toISOString();
-      all = [
-        {
-          id: 'conv-pharma-1-client-demo',
-          client_id: 'client-guest-1',
-          pharmacy_id: 'pharma-1',
-          pharmacy_user_id: 'pharma-1',
-          last_message: 'Bonjour, avez-vous du Paracétamol 1000mg en stock ?',
-          last_message_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-          unread_count_pharmacy: 1,
-          unread_count_client: 0,
-          is_blocked: false,
-          is_reported: false,
-          updated_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-        },
-      ];
-      localStorage.setItem(LOCAL_STORAGE_CONVERSATIONS, JSON.stringify(all));
-    }
 
     // Normalisation pharmacy_id
     all = all.map((c) => ({
       ...c,
-      pharmacy_id: c.pharmacy_id || (c as any).pharmacie_id || 'pharma-1',
+      pharmacy_id: c.pharmacy_id || (c as any).pharmacie_id || '',
     }));
 
     // Tri par last_message_at décroissant
@@ -550,42 +690,7 @@ export function isMessageExpired(m: Message): boolean {
 export function loadMessages(conversationId: string): Message[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
-    let all: Record<string, Message[]> = raw ? JSON.parse(raw) : {};
-    if (!raw) {
-      all = {
-        'conv-pharma-1-client-demo': [
-          {
-            id: 'm-1',
-            conversation_id: 'conv-pharma-1-client-demo',
-            sender_id: 'client-guest-1',
-            receiver_id: 'pharma-1',
-            sender_type: 'client',
-            sender: 'client',
-            content: 'Bonjour, avez-vous du Paracétamol 1000mg en stock ?',
-            text: 'Bonjour, avez-vous du Paracétamol 1000mg en stock ?',
-            created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-            expires_at: new Date(Date.now() - 15 * 60 * 1000 + MS_24_HOURS).toISOString(),
-            type: 'text',
-            is_read: true,
-          },
-          {
-            id: 'm-2',
-            conversation_id: 'conv-pharma-1-client-demo',
-            sender_id: 'pharma-1',
-            receiver_id: 'client-guest-1',
-            sender_type: 'pharma',
-            sender: 'pharma',
-            content: 'Bonjour ! Oui, nous en avons disponible en boîte de 8 et 16 comprimés. Vous pouvez passer.',
-            text: 'Bonjour ! Oui, nous en avons disponible en boîte de 8 et 16 comprimés. Vous pouvez passer.',
-            created_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-            expires_at: new Date(Date.now() - 12 * 60 * 1000 + MS_24_HOURS).toISOString(),
-            type: 'text',
-            is_read: false,
-          },
-        ],
-      };
-      localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
-    }
+    const all: Record<string, Message[]> = raw ? JSON.parse(raw) : {};
     const list = all[conversationId] || [];
     return list.filter((m) => !isMessageExpired(m));
   } catch {
@@ -1396,10 +1501,10 @@ export function getItineraryClicks(pharmaId: string): { today: number; total: nu
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_ITINERARY_CLICKS);
     const today = new Date().toISOString().slice(0, 10);
-    if (!raw) return { today: 4, total: 12 }; // Valeurs initiales réalistes de démonstration
+    if (!raw) return { today: 0, total: 0 };
     const data: ItineraryRecord = JSON.parse(raw);
     const entry = data[pharmaId];
-    if (!entry) return { today: 4, total: 12 };
+    if (!entry) return { today: 0, total: 0 };
     return {
       today: entry.dates?.[today] || 0,
       total: entry.total || 0,
@@ -1510,13 +1615,12 @@ export function loadPubs(): Pub[] {
     const raw = localStorage.getItem(LOCAL_STORAGE_PUBS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {
     // fallback
   }
-  localStorage.setItem(LOCAL_STORAGE_PUBS, JSON.stringify(INITIAL_PUBS));
-  return INITIAL_PUBS;
+  return [];
 }
 
 export function savePubs(list: Pub[]) {
@@ -1724,13 +1828,6 @@ export interface PharmacyStatsSummary {
 export function getPharmacyStats(pharmacieId: string): PharmacyStatsSummary {
   const allStats = loadAllDailyStats();
   const pharmaStats = allStats.filter((s) => s.pharmacie_id === pharmacieId);
-
-  // If completely empty for this pharmacy, initialize a realistic baseline
-  if (pharmaStats.length === 0) {
-    const seeded = seedInitialStatsForPharmacy(pharmacieId);
-    return getPharmacyStatsCalculated(pharmacieId, seeded);
-  }
-
   return getPharmacyStatsCalculated(pharmacieId, pharmaStats);
 }
 
@@ -1788,38 +1885,4 @@ function getPharmacyStatsCalculated(
     dailyStats7Days,
     dailyStats30Days,
   };
-}
-
-function seedInitialStatsForPharmacy(pharmacieId: string): PharmacyDailyStat[] {
-  const allStats = loadAllDailyStats();
-  const existing = allStats.filter((s) => s.pharmacie_id === pharmacieId);
-  if (existing.length > 0) return existing;
-
-  const now = new Date();
-  const newStats: PharmacyDailyStat[] = [];
-
-  // Seed 30 days of realistic patient contacts
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-
-    // Seed pattern: weekend / night guards have higher contacts
-    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-    const base = isWeekend ? 8 : 4;
-    const seedVal =
-      (d.getDate() * 7 + pharmacieId.charCodeAt(pharmacieId.length - 1)) % 7;
-    const count = base + seedVal;
-
-    const entry: PharmacyDailyStat = {
-      pharmacie_id: pharmacieId,
-      date: dateStr,
-      client_count: count,
-    };
-    newStats.push(entry);
-    allStats.push(entry);
-  }
-
-  saveAllDailyStats(allStats);
-  return newStats;
 }

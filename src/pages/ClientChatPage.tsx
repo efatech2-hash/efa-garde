@@ -13,6 +13,7 @@ import {
   unblockConversation,
   markConversationAsRead,
   loadConversations,
+  fetchMessages,
 } from '../services/store';
 import { playNotificationSound } from '../services/sound';
 import { compressChatImage } from '../utils/imageCompressor';
@@ -234,6 +235,14 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     setMessages(msgs);
     prevMessagesCountRef.current = msgs.length;
     setPharmaOnline(pharmacy.is_online);
+
+    // Synchronisation directe depuis Supabase
+    fetchMessages(conv.id).then((serverMsgs) => {
+      if (serverMsgs && serverMsgs.length > 0) {
+        setMessages(serverMsgs);
+        prevMessagesCountRef.current = serverMsgs.length;
+      }
+    }).catch(() => {});
   }, [pharmacy, clientId]);
 
   // Subscribe to changes (messages & status)

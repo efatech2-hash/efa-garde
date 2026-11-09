@@ -13,6 +13,8 @@ import {
   unblockConversation,
   markConversationAsRead,
   getSupabaseClient,
+  fetchConversations,
+  fetchMessages,
 } from '../services/store';
 import { compressChatImage } from '../utils/imageCompressor';
 import { playNotificationSound } from '../services/sound';
@@ -217,6 +219,16 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
       const updatedSelected = list.find((c) => c.id === selectedConv.id);
       if (updatedSelected) setSelectedConv(updatedSelected);
     }
+
+    // Synchronisation Supabase en tâche de fond
+    fetchConversations(currentPharma.id).then((serverConvs) => {
+      if (serverConvs) {
+        setConversations(serverConvs);
+        if (!selectedConv && serverConvs.length > 0) {
+          setSelectedConv(serverConvs[0]);
+        }
+      }
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -233,6 +245,14 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     const msgs = loadMessages(selectedConv.id);
     setMessages(msgs);
     prevMsgCountRef.current = msgs.length;
+
+    // Synchronisation messages Supabase en temps réel
+    fetchMessages(selectedConv.id).then((serverMsgs) => {
+      if (serverMsgs) {
+        setMessages(serverMsgs);
+        prevMsgCountRef.current = serverMsgs.length;
+      }
+    }).catch(() => {});
   }, [selectedConv?.id, currentPharma?.id]);
 
   // Subscribe to realtime store & sound notifications

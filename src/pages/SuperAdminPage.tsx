@@ -12,6 +12,7 @@ import {
   updateSignalementStatus,
   loadMessages,
   unblockConversation,
+  fetchClientsCount,
 } from '../services/store';
 import { checkRateLimit } from '../utils/security';
 import { Logo } from '../components/Logo';
@@ -161,13 +162,24 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     setSignalements(loadSignalements());
   };
 
+  const [clientsCount, setClientsCount] = useState<number>(0);
+
+  const refreshClientsCount = async () => {
+    try {
+      const c = await fetchClientsCount();
+      setClientsCount(c);
+    } catch {}
+  };
+
   // Listen to store updates
   useEffect(() => {
     const unsub = subscribeToStore(() => {
       setPharmacies(loadPharmacies());
       refreshSignalements();
+      refreshClientsCount();
     });
     refreshSignalements();
+    refreshClientsCount();
     return () => unsub();
   }, []);
 
@@ -631,8 +643,8 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
 
         {activeTab === 'pharmacies' ? (
           <>
-            {/* STATS EN HAUT : Total, Actifs, Inactifs */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            {/* STATS EN HAUT : Total, Actifs, Inactifs, Clients Inscrits */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {/* Total */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg flex items-center justify-between">
             <div>
@@ -684,6 +696,24 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
             </div>
             <div className="w-12 h-12 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-xl border border-slate-700">
               <XCircle className="w-6 h-6" />
+            </div>
+          </div>
+
+          {/* Clients Inscrits (Table clients Supabase) */}
+          <div className="bg-slate-900 border border-sky-500/30 rounded-3xl p-5 shadow-lg flex items-center justify-between bg-gradient-to-br from-slate-900 to-sky-950/20">
+            <div>
+              <span className="text-xs uppercase font-extrabold text-sky-400 tracking-wider">
+                Clients Inscrits
+              </span>
+              <div className="text-2xl sm:text-3xl font-black text-sky-300 mt-1">
+                {clientsCount}
+              </div>
+              <span className="text-[11px] text-sky-400/80">
+                Table clients Supabase (WhatsApp)
+              </span>
+            </div>
+            <div className="w-12 h-12 rounded-2xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-xl border border-sky-500/40">
+              <Phone className="w-6 h-6" />
             </div>
           </div>
         </div>

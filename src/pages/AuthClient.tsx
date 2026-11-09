@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { setSession } from '../lib/auth';
-import { Smartphone, CheckCircle, ArrowRight, ShieldCheck, Sparkles, MessageCircle } from 'lucide-react';
-
+import { registerClientInDB } from '../services/store';
+import { CheckCircle, MessageCircle, User } from 'lucide-react';
 import { Logo } from '../components/Logo';
 
 interface AuthClientProps {
@@ -10,53 +10,69 @@ interface AuthClientProps {
 }
 
 export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles }) => {
-  const [phone, setPhone] = useState('');
-  const [step, setStep] = useState<'phone' | 'otp' | 'welcome'>('phone');
-  const [otp, setOtp] = useState('');
+  const [nom, setNom] = useState(() => localStorage.getItem('efa_client_nom') || '');
+  const [phone, setPhone] = useState(() => localStorage.getItem('efa_client_whatsapp') || '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<'form' | 'welcome'>('form');
 
-  const handleSendOtp = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanNom = nom.trim();
     const cleanPhone = phone.trim().replace(/\s+/g, '');
+
+    if (cleanNom.length < 2) {
+      setError('Veuillez renseigner votre nom complet.');
+      return;
+    }
     if (cleanPhone.length < 8) {
-      setError('Veuillez entrer un numéro valide (ex: 90 12 34 56)');
-      return;
-    }
-    setError(null);
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setStep('otp');
-    }, 400);
-  };
-
-  const handleVerifyOtp = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (otp !== '1234' && otp.trim() !== '1234') {
-      setError('Code incorrect. Utilisez le code mock : 1234');
+      setError('Veuillez entrer un numéro WhatsApp valide (ex: 90 12 34 56).');
       return;
     }
 
     setError(null);
     setLoading(true);
 
-    setTimeout(() => {
-      // Set permanent session in localStorage
+    try {
+      // 1. Enregistrement direct dans Supabase table `clients`
+      const registered = await registerClientInDB({
+        nom: cleanNom,
+        numero_whatsapp: cleanPhone,
+      });
+
+      // 2. Session persistante pour que la prochaine ouverture = entrée directe sans re-saisir
       setSession({
         role: 'client',
-        phone: '+228 ' + phone,
+        phone: cleanPhone,
+        pharmacieNom: cleanNom,
         createdAt: new Date().toISOString(),
       });
+      localStorage.setItem('role', 'client');
+      localStorage.setItem('efa_garde_role', 'client');
+      localStorage.setItem('efa_client_id', registered.id);
+      localStorage.setItem('efa_client_nom', registered.nom);
+      localStorage.setItem('efa_client_whatsapp', registered.numero_whatsapp);
 
       setLoading(false);
       setStep('welcome');
 
-      // Auto redirect after welcome greeting
       setTimeout(() => {
         onSuccess();
-      }, 1000);
-    }, 400);
+      }, 700);
+    } catch (err) {
+      console.warn('Erreur inscription client:', err);
+      // Fallback local persistant garanti
+      setSession({
+        role: 'client',
+        phone: cleanPhone,
+        pharmacieNom: cleanNom,
+        createdAt: new Date().toISOString(),
+      });
+      localStorage.setItem('role', 'client');
+      localStorage.setItem('efa_garde_role', 'client');
+      setLoading(false);
+      onSuccess();
+    }
   };
 
   return (
@@ -71,21 +87,42 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
             <Logo className="w-full h-full" variant="blue" />
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-            EFA GARDE • Espace Patient
+            EFA GARDE • Espace Client
           </h1>
           <p className="text-xs text-slate-400">
-            Connexion unique sans mot de passe ni code PIN
+            Inscription rapide : Nom & Numéro WhatsApp
           </p>
         </div>
 
-        {step === 'phone' && (
-          <form onSubmit={handleSendOtp} className="space-y-4">
+        {step === 'form' && (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Nom complet */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 block">
+                Votre nom complet :
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-3.5 text-slate-400">
+                  <User className="w-5 h-5" />
+                </span>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Koffi Mensah"
+                  value={nom}
+                  onChange={(e) => setNom(e.target.value)}
+                  className="w-full h-14 bg-slate-800 text-white pl-12 pr-4 rounded-xl border border-slate-700 text-base focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                />
+              </div>
+            </div>
+
+            {/* Numéro WhatsApp */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300 block">
                 Numéro WhatsApp (+228 Togo) :
               </label>
               <div className="relative">
-                <span className="absolute left-3.5 top-3 text-xs text-slate-400 font-mono">
+                <span className="absolute left-3.5 top-3.5 text-xs text-slate-400 font-mono">
                   +228
                 </span>
                 <input
@@ -111,12 +148,12 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
               className="w-full min-h-[48px] py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-base shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
             >
               <MessageCircle className="w-5 h-5" />
-              <span>{loading ? 'Envoi...' : 'Recevoir le code WhatsApp'}</span>
+              <span>{loading ? 'Enregistrement...' : 'Accéder aux pharmacies de garde'}</span>
             </button>
 
             <div className="p-3 bg-slate-800/40 rounded-xl text-[11px] text-slate-400 border border-slate-800 text-center">
-              ✓ Aucune création de mot de passe requise<br />
-              ✓ Session persistante et instantanée
+              ✓ Inscription instantanée et unique<br />
+              ✓ Prochaine ouverture = entrée directe sans re-saisie
             </div>
 
             {onBackToRoles && (
@@ -133,75 +170,16 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
           </form>
         )}
 
-        {step === 'otp' && (
-          <form onSubmit={handleVerifyOtp} className="space-y-4">
-            <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-center text-xs text-emerald-300">
-              Code envoyé sur WhatsApp au <span className="font-bold">+228 {phone}</span>
-              <div className="mt-1 font-mono text-emerald-400 font-bold bg-emerald-900/50 py-1 rounded inline-block px-3">
-                Code test : 1234
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300 block text-center">
-                Entrez le code OTP (4 chiffres) :
-              </label>
-              <input
-                type="text"
-                maxLength={4}
-                required
-                autoFocus
-                placeholder="1234"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                className="w-full h-14 bg-slate-800 text-white text-center tracking-[0.5em] font-mono text-2xl rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 shadow-inner"
-              />
-            </div>
-
-            {error && (
-              <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 p-2.5 rounded-xl text-center">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full min-h-[48px] py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-base shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
-            >
-              <CheckCircle className="w-5 h-5" />
-              <span>{loading ? 'Validation...' : 'Valider et continuer'}</span>
-            </button>
-
-            <div className="flex justify-between items-center text-xs text-slate-400 pt-1">
-              <button
-                type="button"
-                onClick={() => setStep('phone')}
-                className="hover:text-slate-200"
-              >
-                Modifier le numéro
-              </button>
-              <button
-                type="button"
-                onClick={() => setOtp('1234')}
-                className="text-emerald-400 font-medium hover:underline"
-              >
-                Remplir (1234)
-              </button>
-            </div>
-          </form>
-        )}
-
         {step === 'welcome' && (
           <div className="text-center py-6 space-y-3 animate-in zoom-in-95 duration-200">
             <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 mx-auto flex items-center justify-center border border-emerald-500/40">
               <CheckCircle className="w-10 h-10" />
             </div>
             <h2 className="text-2xl font-black text-white">
-              Bienvenue sur EFA GARDE !
+              Bienvenue sur EFA GARDE, {nom || 'Patient'} !
             </h2>
             <p className="text-xs text-slate-300">
-              Votre session est enregistrée. Redirection vers la carte de Lomé...
+              Votre compte client est enregistré. Accès direct à la carte de Lomé...
             </p>
             <div className="pt-2">
               <span className="inline-block w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></span>
