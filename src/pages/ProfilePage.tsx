@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pharmacie } from '../types';
 import { getSession, clearSession } from '../lib/auth';
+import { Logo } from '../components/Logo';
 import {
   User,
   Shield,
@@ -68,16 +69,20 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
 
   return (
     <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6 pb-28 font-sans antialiased animate-in fade-in duration-200">
-      {/* Header Profile Title */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
-            <User className="w-7 h-7 text-green-400" />
-            Mon Profil & Paramètres
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Gérez vos préférences, votre statut et l'accès à vos services EFA GARDE.
-          </p>
+      {/* Header Profile Title with Official Logo */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-white p-1.5 shadow-md border border-slate-700/60 flex items-center justify-center shrink-0">
+            <Logo className="w-full h-full" variant="blue" />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Mon Profil & Paramètres
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Gérez vos préférences, votre statut et l'accès aux services EFA GARDE.
+            </p>
+          </div>
         </div>
 
         <span
@@ -328,6 +333,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           </button>
         </div>
       )}
+
+      {/* Official Footer Branding */}
+      <div className="pt-6 pb-2 flex flex-col items-center justify-center text-center space-y-2 select-none opacity-80">
+        <div className="w-12 h-12 rounded-2xl bg-white p-1.5 shadow-md border border-slate-700/60 flex items-center justify-center">
+          <Logo className="w-full h-full" variant="blue" />
+        </div>
+        <div>
+          <div className="text-xs font-bold text-slate-300 tracking-wide">EFA GARDE • Lomé</div>
+          <div className="text-[10px] text-slate-500">Ordre National des Pharmaciens du Togo</div>
+        </div>
+      </div>
     </div>
   );
 };
