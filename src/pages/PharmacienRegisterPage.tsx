@@ -267,10 +267,10 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
                 Vérification Obligatoire
               </p>
               <p>
-                Pour garantir la sécurité des patients de Lomé et lutter contre les fausses officines, l'enregistrement nécessite le règlement préalable de <strong>25.000 FCFA</strong> via T-Money ou Moov Money.
+                Pour garantir la sécurité des patients de Lomé et lutter contre les fausses officines, l'enregistrement nécessite le règlement préalable de <strong>25.000 FCFA</strong> via WhatsApp (+228 96 10 09 72).
               </p>
               <p className="text-slate-400 text-[11px]">
-                Une fois le paiement effectué, le formulaire officiel sera instantanément débloqué.
+                Une fois le paiement validé et votre code à 4 chiffres saisi sur la page de paiement, le formulaire officiel sera instantanément débloqué.
               </p>
             </div>
 
@@ -291,7 +291,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
                 className="w-full min-h-[50px] py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
               >
                 <CreditCard className="w-5 h-5" />
-                <span>Payer les 25.000 FCFA par T-Money / Moov Money</span>
+                <span>Aller à la page de paiement (25.000 FCFA)</span>
               </button>
 
               <button

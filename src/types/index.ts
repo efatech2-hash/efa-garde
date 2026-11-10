@@ -42,7 +42,7 @@ export interface Pharmacie {
   piece_url?: string;
   email_pro?: string;
   mot_de_passe?: string;
-  statut?: 'pending' | 'approved' | 'rejected';
+  statut?: 'pending' | 'en_attente' | 'approved' | 'rejected';
   itinerary_clicks?: number;
   horaires?: string;
 }
@@ -147,14 +147,31 @@ export interface PharmacyDailyStat {
 export interface Client {
   id: string;
   nom: string;
+  numero?: string;
   numero_whatsapp: string;
   date_inscription: string;
+  created_at?: string;
+}
+
+export interface DemandeAbonnement {
+  id: string;
+  nom_pharmacie: string;
+  telephone: string;
+  email?: string;
+  montant: number;
+  plan?: string;
+  statut: 'en_attente' | 'paye_valide' | 'rejete';
+  code_validation?: string;
+  created_at: string;
+  pharmacie_id?: string;
+  validated_at?: string;
 }
 
 export interface Abonnement {
   id: string;
   entreprise_id?: string;
   pharmacie_id: string;
+  nom_pharmacie?: string;
   plan: string;
   statut: string;
   montant?: number;
@@ -162,5 +179,6 @@ export interface Abonnement {
   expire_le: string;
   created_at?: string;
   updated_at?: string;
+  code_validation?: string;
 }
 

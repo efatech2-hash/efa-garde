@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
 import { saveRegistrationPaymentToken } from '../lib/paymentTokens';
+import { createSubscriptionPaymentRequest, verifyRegistrationCode } from '../services/store';
 import { Logo } from '../components/Logo';
 import {
   ShieldCheck,
-  Smartphone,
   CheckCircle2,
   AlertCircle,
   ArrowLeft,
   Lock,
-  Building2,
-  Sparkles,
   MessageCircle,
+  KeyRound,
+  Sparkles,
 } from 'lucide-react';
 
 interface PaiementInscriptionPageProps {
@@ -22,11 +22,14 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
   onSuccess,
   onBackToLogin,
 }) => {
-  const [operator, setOperator] = useState<'TMONEY' | 'MOOV'>('TMONEY');
-  const [phoneNumber, setPhoneNumber] = useState('90 12 34 56');
   const [nomPharmacie, setNomPharmacie] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [codeValidation, setCodeValidation] = useState('');
+
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [hasSentRequest, setHasSentRequest] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -34,39 +37,95 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
     import.meta.env.VITE_WHATSAPP_NUMBER ||
     '22896100972'
   ).replace(/[^0-9]/g, '');
-  const cleanNom = nomPharmacie.trim();
-  const cleanEmail = email.trim();
-  const whatsappUrl = `https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(
-    `Bonjour EFA TECH, je souhaite payer les 25.000F pour enregistrer ma pharmacie ${cleanNom || ''}. Email: ${cleanEmail || ''}`
-  )}`;
 
-  const handlePay = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const cleanNom = nomPharmacie.trim();
+  const cleanPhone = phoneNumber.replace(/\s+/g, '');
+
+  // 1. Clic "Payer 25.000F via WhatsApp"
+  // - Ouvre WhatsApp
+  // - Crée automatiquement une demande dans Super Admin > Nouvel Abonnement
+  const handleOpenWhatsAppAndCreateDemand = async () => {
     setErrorMessage(null);
 
-    const cleanPhone = phoneNumber.replace(/\s+/g, '');
+    if (!cleanNom) {
+      setErrorMessage('Veuillez renseigner le nom de votre pharmacie.');
+      return;
+    }
     if (cleanPhone.length < 8) {
-      setErrorMessage('Veuillez renseigner un numéro de téléphone valide à 8 chiffres.');
+      setErrorMessage('Veuillez renseigner un numéro WhatsApp valide à au moins 8 chiffres.');
       return;
     }
 
-    setIsProcessing(true);
+    setIsSendingWhatsApp(true);
 
-    // Simulation validation USSD instantanée Mobile Money au Togo
-    setTimeout(() => {
-      const token = saveRegistrationPaymentToken({
-        operator,
-        phone: cleanPhone,
+    try {
+      // 1. Crée la demande d'abonnement / enregistrement dans Supabase
+      await createSubscriptionPaymentRequest({
+        nom_pharmacie: cleanNom,
+        telephone: cleanPhone,
+        email: email.trim() || undefined,
+        montant: 25000,
       });
 
-      setIsProcessing(false);
+      setHasSentRequest(true);
+
+      // 2. Ouvre le lien WhatsApp officiel
+      const msg = `Bonjour EFA TECH, je souhaite payer les 25.000 FCFA pour enregistrer ma pharmacie "${cleanNom}". Tel: ${cleanPhone}${email.trim() ? ' - Email: ' + email.trim() : ''}`;
+      const url = `https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(msg)}`;
+      window.open(url, '_blank');
+    } catch (err) {
+      console.warn('Erreur création demande abonnement:', err);
+      // Ouvre tout de même WhatsApp pour ne pas bloquer le pharmacien
+      const msg = `Bonjour EFA TECH, je souhaite payer les 25.000 FCFA pour enregistrer ma pharmacie "${cleanNom}". Tel: ${cleanPhone}`;
+      window.open(`https://wa.me/${rawWhatsapp}?text=${encodeURIComponent(msg)}`, '_blank');
+      setHasSentRequest(true);
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
+  };
+
+  // 2. Vérification du code 4 chiffres envoyé par le Super Admin
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    const cleanCode = codeValidation.trim();
+    if (cleanCode.length !== 4) {
+      setErrorMessage('Veuillez renseigner le code à 4 chiffres reçu par WhatsApp.');
+      return;
+    }
+
+    setIsVerifyingCode(true);
+
+    try {
+      const res = await verifyRegistrationCode(cleanCode, cleanPhone);
+
+      if (!res.valid) {
+        setErrorMessage(
+          res.error ||
+            'Code à 4 chiffres incorrect ou paiement non encore validé par l\'administrateur. Veuillez patienter ou contacter le support sur WhatsApp.'
+        );
+        setIsVerifyingCode(false);
+        return;
+      }
+
+      // Code BON = Débloque la suite
+      const token = saveRegistrationPaymentToken({
+        operator: 'TMONEY',
+        phone: cleanPhone || res.demande?.telephone || '22890000000',
+      });
+
+      setIsVerifyingCode(false);
       setIsSuccess(true);
 
-      // Redirection automatique après 1.2s vers le formulaire d'enregistrement
       setTimeout(() => {
         onSuccess(token.id);
       }, 1200);
-    }, 1500);
+    } catch (err) {
+      console.warn('Erreur vérification code:', err);
+      setErrorMessage('Erreur lors de la vérification du code. Réessayez.');
+      setIsVerifyingCode(false);
+    }
   };
 
   return (
@@ -84,7 +143,7 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
             <span>Retour connexion</span>
           </button>
           <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
-            Vérification
+            Étape 1 / 2 : Paiement
           </span>
         </div>
 
@@ -93,13 +152,11 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
           <div className="w-14 h-14 mx-auto rounded-2xl bg-white p-2 shadow-lg shadow-emerald-900/30 border border-slate-200 flex items-center justify-center">
             <Logo className="w-full h-full" variant="blue" />
           </div>
-          
-          {/* Titre demandé exactement */}
+
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight pt-1">
             Enregistrement Officine - 25.000 FCFA
           </h1>
 
-          {/* Texte demandé exactement */}
           <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed max-w-md mx-auto">
             Pour éviter les fausses pharmacies, l'enregistrement nécessite 25.000 FCFA
           </p>
@@ -113,19 +170,19 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
             </div>
             <div className="space-y-1">
               <h3 className="text-xl font-black text-white">
-                Paiement de 25.000 FCFA Confirmé !
+                Code Validé avec Succès !
               </h3>
               <p className="text-xs text-slate-300">
-                Token de paiement validé. Redirection vers le formulaire officiel...
+                Paiement vérifié. Déblocage du formulaire officiel d'enregistrement...
               </p>
             </div>
             <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 font-semibold pt-2">
               <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
-              <span>Ouverture du formulaire d'enregistrement...</span>
+              <span>Redirection en cours...</span>
             </div>
           </div>
         ) : (
-          <form onSubmit={handlePay} className="space-y-5">
+          <div className="space-y-6">
             {/* Box Récapitulative Sécurisée */}
             <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5">
               <div className="flex items-center justify-between text-xs">
@@ -137,8 +194,8 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
                 <span className="text-base font-black text-emerald-400">25.000 FCFA</span>
               </div>
               <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/80">
-                <span className="text-slate-400 font-medium">Disponibilité :</span>
-                <span className="text-slate-200 font-medium">Déblocage immédiat du formulaire</span>
+                <span className="text-slate-400 font-medium">Validation :</span>
+                <span className="text-slate-200 font-medium">Code secret à 4 chiffres envoyé sur WhatsApp</span>
               </div>
             </div>
 
@@ -150,69 +207,48 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
               </div>
             )}
 
-            {/* Operator Selector (T-Money vs Moov Money) */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-300 block">
-                Sélectionnez votre moyen de paiement Mobile Money :
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                {/* Togocom T-Money */}
-                <button
-                  type="button"
-                  onClick={() => setOperator('TMONEY')}
-                  className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                    operator === 'TMONEY'
-                      ? 'bg-amber-500/20 border-amber-400 ring-2 ring-amber-400/40 text-white font-black shadow-lg shadow-amber-900/20'
-                      : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className="w-7 h-7 rounded-lg bg-yellow-400 text-slate-950 font-black text-xs flex items-center justify-center shadow">
-                      T
-                    </div>
-                    <span className="text-sm font-black">T-Money</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400">Togocom (*145#)</div>
-                </button>
-
-                {/* Moov Money / Flooz */}
-                <button
-                  type="button"
-                  onClick={() => setOperator('MOOV')}
-                  className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                    operator === 'MOOV'
-                      ? 'bg-blue-500/20 border-blue-400 ring-2 ring-blue-400/40 text-white font-black shadow-lg shadow-blue-900/20'
-                      : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className="w-7 h-7 rounded-lg bg-blue-600 text-white font-black text-[10px] flex items-center justify-center shadow">
-                      Moov
-                    </div>
-                    <span className="text-sm font-black">Moov Money</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400">Flooz (*155#)</div>
-                </button>
+            {/* Formulaire Demandeur (Nom + WhatsApp) */}
+            <div className="space-y-3.5 bg-slate-950/40 p-4 rounded-2xl border border-slate-800/60">
+              <div className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
+                1. Vos coordonnées pour la validation
               </div>
-            </div>
 
-            {/* Nom pharmacie & Email pour personnalisation */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-300 block">
-                  Nom de la pharmacie :
+                  Nom de la pharmacie * :
                 </label>
                 <input
                   type="text"
+                  required
                   value={nomPharmacie}
                   onChange={(e) => setNomPharmacie(e.target.value)}
-                  placeholder="Ex: Pharmacie du Progrès"
-                  className="w-full bg-slate-800 text-white px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
+                  placeholder="Ex: Pharmacie du Progrès Lomé"
+                  className="w-full bg-slate-800 text-white px-3.5 py-3 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
                 />
               </div>
+
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-300 block">
-                  Email pro :
+                  Numéro WhatsApp de contact * (+228) :
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-3 text-xs text-slate-400 font-mono font-bold">
+                    +228
+                  </span>
+                  <input
+                    type="tel"
+                    required
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="90 12 34 56"
+                    className="w-full bg-slate-800 text-white pl-16 pr-4 py-3 rounded-xl border border-slate-700 font-mono text-xs focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Email professionnel (optionnel) :
                 </label>
                 <input
                   type="email"
@@ -222,87 +258,77 @@ export const PaiementInscriptionPage: React.FC<PaiementInscriptionPageProps> = (
                   className="w-full bg-slate-800 text-white px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs focus:outline-none focus:border-emerald-500 shadow-inner"
                 />
               </div>
+
+              {/* BOUTON OFFICIEL WHATSAPP : Ouvre WhatsApp + Crée auto une demande dans Super Admin > Nouvel Abonnement */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleOpenWhatsAppAndCreateDemand}
+                  disabled={isSendingWhatsApp}
+                  className="w-full min-h-[52px] py-3.5 px-6 rounded-2xl bg-[#25D366] hover:bg-[#20ba59] active:bg-[#1da850] text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-[#25D366]/30 transition-all flex items-center justify-center gap-2.5 cursor-pointer text-center active:scale-98 border border-emerald-300"
+                >
+                  <MessageCircle className="w-5 h-5 fill-slate-950 text-slate-950 shrink-0" />
+                  <span>
+                    {isSendingWhatsApp ? 'Création de la demande...' : 'Payer 25.000F via WhatsApp'}
+                  </span>
+                </button>
+                <div className="text-center text-[10px] text-slate-400 mt-1.5 font-medium">
+                  Cliquez pour ouvrir WhatsApp EFA TECH (+228 96 10 09 72) et créer votre dossier.
+                </div>
+              </div>
             </div>
 
-            {/* Phone Input */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 block">
-                Numéro Mobile Money Togo (+228) :
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-3 text-xs text-slate-400 font-mono font-bold">
-                  +228
-                </span>
+            {hasSentRequest && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Demande transmise au Super Administrateur !</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Après confirmation de votre paiement, l'administrateur vous transmettra votre code à 4 chiffres sur WhatsApp. Saisissez-le ci-dessous.
+                </p>
+              </div>
+            )}
+
+            {/* 2. CASE CODE 4 CHIFFRES : Code faux = bloqué, Code bon = débloque suite */}
+            <form onSubmit={handleVerifyCode} className="space-y-3.5 bg-slate-950/80 p-5 rounded-2xl border-2 border-emerald-500/40">
+              <div className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-wider">
+                <KeyRound className="w-4 h-4 text-emerald-400" />
+                <span>2. Déblocage : Saisissez votre code 4 chiffres</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Entrez le code secret à 4 chiffres généré et envoyé par le Super Administrateur sur WhatsApp après réception de votre paiement.
+              </p>
+
+              <div className="space-y-1">
                 <input
-                  type="tel"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
                   required
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="90 12 34 56"
-                  className="w-full bg-slate-800 text-white pl-16 pr-4 py-3 rounded-xl border border-slate-700 font-mono text-sm focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                  value={codeValidation}
+                  onChange={(e) => setCodeValidation(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="Ex: 4829"
+                  className="w-full h-14 bg-slate-900 border-2 border-emerald-500/50 text-emerald-400 text-2xl font-black text-center tracking-[0.5em] rounded-xl focus:outline-none focus:border-emerald-400 shadow-inner"
                 />
               </div>
-            </div>
 
-            {/* USSD Info Note */}
-            <div className="p-3 bg-slate-800/60 border border-slate-700/60 rounded-xl text-xs text-slate-400 space-y-1">
-              <p className="flex items-center gap-1.5 text-slate-300 font-semibold">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Paiement sécurisé par push USSD</span>
-              </p>
-              <p className="text-[11px] leading-relaxed">
-                Après avoir cliqué, vous recevrez un prompt sur votre téléphone{' '}
-                <strong className="text-slate-200">
-                  {operator === 'TMONEY' ? 'Togocom' : 'Moov Africa'}
-                </strong>{' '}
-                pour valider les 25.000 FCFA avec votre code secret.
-              </p>
-            </div>
-
-            {/* Bouton USSD */}
-            <button
-              type="submit"
-              disabled={isProcessing}
-              className="w-full min-h-[50px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-60"
-            >
-              {isProcessing ? (
-                <>
-                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Traitement USSD Mobile Money...</span>
-                </>
-              ) : (
-                <>
-                  <Smartphone className="w-5 h-5" />
-                  <span>Payer par T-Money / Moov Money</span>
-                </>
-              )}
-            </button>
-
-            {/* Divider */}
-            <div className="flex items-center gap-3 pt-2">
-              <div className="flex-1 h-px bg-slate-800" />
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                OU VIA WHATSAPP DIRECT
-              </span>
-              <div className="flex-1 h-px bg-slate-800" />
-            </div>
-
-            {/* GROS BOUTON FIXE "Payer 25.000F via WhatsApp" */}
-            <div className="pt-1 sticky bottom-2 z-30">
-              <a
-                href={whatsappUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full min-h-[56px] py-4 px-6 rounded-2xl bg-[#25D366] hover:bg-[#20ba59] active:bg-[#1da850] text-slate-950 font-black text-sm sm:text-base shadow-2xl shadow-[#25D366]/40 transition-all flex items-center justify-center gap-2.5 cursor-pointer text-center active:scale-98 border-2 border-emerald-300"
+              <button
+                type="submit"
+                disabled={isVerifyingCode || codeValidation.length !== 4}
+                className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm shadow-lg shadow-emerald-600/30 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
               >
-                <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 fill-slate-950 text-slate-950 shrink-0" />
-                <span>Payer 25.000F via WhatsApp</span>
-              </a>
-              <div className="text-center text-[10px] sm:text-[11px] text-slate-400 mt-1.5 font-medium">
-                Assistance immédiate et validation instantanée sur WhatsApp (+228 96 10 09 72)
-              </div>
-            </div>
-          </form>
+                {isVerifyingCode ? (
+                  <span>Vérification en base de données...</span>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Valider le code & Remplir le formulaire</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
         )}
       </div>
     </div>

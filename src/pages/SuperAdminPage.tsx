@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pharmacie, Signalement, Message } from '../types';
+import { Pharmacie, Signalement, Message, DemandeAbonnement, PharmaciePending } from '../types';
 import {
   loadPharmacies,
   savePharmacies,
@@ -13,6 +13,12 @@ import {
   loadMessages,
   unblockConversation,
   fetchClientsCount,
+  loadDemandesAbonnement,
+  fetchDemandesAbonnement,
+  validateSubscriptionPaymentAndGenerateCode,
+  loadPendingPharmacies,
+  approvePharmacySuperAdmin,
+  rejectPharmacySuperAdmin,
 } from '../services/store';
 import { checkRateLimit } from '../utils/security';
 import { Logo } from '../components/Logo';
@@ -44,6 +50,12 @@ import {
   Ban,
   Unlock,
   X,
+  CreditCard,
+  KeyRound,
+  BellRing,
+  UserCheck,
+  Trash2,
+  Send,
 } from 'lucide-react';
 
 const SUPER_ADMIN_TOKEN_KEY = 'super_admin_token';
@@ -124,8 +136,17 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   const [showGatePassword, setShowGatePassword] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
 
-  // Navigation Onglets Super Admin ('pharmacies' | 'signalements')
-  const [activeTab, setActiveTab] = useState<'pharmacies' | 'signalements'>('pharmacies');
+  // Navigation Onglets Super Admin ('souscriptions' | 'abonnements' | 'pharmacies' | 'signalements')
+  const [activeTab, setActiveTab] = useState<'souscriptions' | 'abonnements' | 'pharmacies' | 'signalements'>('pharmacies');
+
+  // Demandes de paiement 25.000 FCFA & codes 4 chiffres
+  const [demandesAbonnement, setDemandesAbonnement] = useState<DemandeAbonnement[]>(() => loadDemandesAbonnement());
+
+  // Pharmacies enregistrées en attente de validation ("Quelqu'un a souscrit")
+  const [pendingPharmacies, setPendingPharmacies] = useState<PharmaciePending[]>(() => loadPendingPharmacies());
+
+  // Codes 4 chiffres récemment générés
+  const [generatedCodes, setGeneratedCodes] = useState<Record<string, string>>({});
 
   // Pharmacy Data
   const [pharmacies, setPharmacies] = useState<Pharmacie[]>(() => loadPharmacies());
@@ -171,15 +192,31 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     } catch {}
   };
 
+  const refreshDemandes = async () => {
+    try {
+      const d = await fetchDemandesAbonnement();
+      setDemandesAbonnement(d);
+    } catch {}
+  };
+
+  const refreshPending = () => {
+    setPendingPharmacies(loadPendingPharmacies());
+  };
+
   // Listen to store updates
   useEffect(() => {
     const unsub = subscribeToStore(() => {
       setPharmacies(loadPharmacies());
       refreshSignalements();
       refreshClientsCount();
+      refreshDemandes();
+      refreshPending();
     });
+    fetchPharmacies().then((data) => setPharmacies(data)).catch(() => {});
     refreshSignalements();
     refreshClientsCount();
+    refreshDemandes();
+    refreshPending();
     return () => unsub();
   }, []);
 
@@ -283,6 +320,33 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     localStorage.removeItem('is_super_admin');
     setIsAuthenticated(false);
     onNavigateToLogin();
+  };
+
+  // Action : Valider Paiement 25k & Générer code 4 chiffres pour le pharmacien
+  const handleValidatePaymentAndGenerateCode = async (demande: DemandeAbonnement) => {
+    const res = await validateSubscriptionPaymentAndGenerateCode(demande.id);
+    setGeneratedCodes((prev) => ({ ...prev, [demande.id]: res.code }));
+    await refreshDemandes();
+    showToast(`✅ Paiement validé pour "${demande.nom_pharmacie}" ! Code généré : ${res.code}`);
+  };
+
+  // Action : Valider l'inscription d'une pharmacie soumise ("Quelqu'un a souscrit")
+  // -> Seulement après cette validation, la pharmacie devient visible sur l'application publique !
+  const handleApprovePharmacy = async (pendingId: string) => {
+    const success = await approvePharmacySuperAdmin(pendingId);
+    if (success) {
+      await fetchPharmacies();
+      setPharmacies(loadPharmacies());
+      refreshPending();
+      showToast(`🎉 Pharmacie validée avec succès ! Elle est désormais visible sur l'application.`);
+    }
+  };
+
+  // Action : Refuser la souscription d'une pharmacie
+  const handleRejectPharmacy = async (pendingId: string) => {
+    await rejectPharmacySuperAdmin(pendingId);
+    refreshPending();
+    showToast(`Demande de souscription refusée.`);
   };
 
   // 1. Action: BOUTON POPULAIRE MENSUEL (15.000F) : couleur GOLD bg-yellow-500
@@ -609,18 +673,101 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+        {/* Bannières d'alerte instantanée */}
+        {pendingPharmacies.length > 0 && (
+          <div className="p-4 rounded-3xl bg-amber-500/15 border-2 border-amber-500/60 text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shrink-0">
+                🔔
+              </div>
+              <div>
+                <h4 className="font-black text-white text-sm">
+                  Quelqu'un a souscrit ! ({pendingPharmacies.length} en attente)
+                </h4>
+                <p className="text-xs text-amber-200/80">
+                  Une ou plusieurs pharmacies ont rempli le formulaire et attendent votre validation avant d'être visibles sur l'application.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveTab('souscriptions')}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all shadow-md cursor-pointer shrink-0"
+            >
+              Voir les souscriptions ({pendingPharmacies.length}) →
+            </button>
+          </div>
+        )}
+
+        {demandesAbonnement.filter((d) => d.statut === 'en_attente').length > 0 && (
+          <div className="p-4 rounded-3xl bg-emerald-500/15 border-2 border-emerald-500/50 text-emerald-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black text-xl shrink-0">
+                💳
+              </div>
+              <div>
+                <h4 className="font-black text-white text-sm">
+                  Nouvelle demande de paiement 25.000 FCFA reçue !
+                </h4>
+                <p className="text-xs text-emerald-200/80">
+                  {demandesAbonnement.filter((d) => d.statut === 'en_attente').length} demande(s) en attente de validation de paiement et de génération de code 4 chiffres.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveTab('abonnements')}
+              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition-all shadow-md cursor-pointer shrink-0"
+            >
+              Gérer les abonnements →
+            </button>
+          </div>
+        )}
+
         {/* ONGLET SELECTOR */}
-        <div className="flex items-center gap-3 border-b border-slate-800 pb-3 flex-wrap">
+        <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3 flex-wrap">
           <button
-            onClick={() => setActiveTab('pharmacies')}
+            onClick={() => setActiveTab('souscriptions')}
             className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
-              activeTab === 'pharmacies'
+              activeTab === 'souscriptions'
                 ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
                 : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
             }`}
           >
+            <BellRing className="w-4 h-4" />
+            <span>Quelqu'un a souscrit</span>
+            {pendingPharmacies.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[11px] font-black animate-pulse shadow-sm">
+                {pendingPharmacies.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('abonnements')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'abonnements'
+                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Nouveaux Abonnements</span>
+            {demandesAbonnement.filter((d) => d.statut === 'en_attente').length > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 text-[11px] font-black shadow-sm">
+                {demandesAbonnement.filter((d) => d.statut === 'en_attente').length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('pharmacies')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'pharmacies'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
             <Building2 className="w-4 h-4" />
-            <span>Gestion Pharmacies ({totalCount})</span>
+            <span>Pharmacies Validées ({totalCount})</span>
           </button>
 
           <button
@@ -641,8 +788,253 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
           </button>
         </div>
 
-        {activeTab === 'pharmacies' ? (
-          <>
+        {/* CONTENU ONGLET 1 : SOUSCRIPTIONS EN ATTENTE (Quelqu'un a souscrit) */}
+        {activeTab === 'souscriptions' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <span>🔔 Souscriptions récentes ("Quelqu'un a souscrit")</span>
+                  <span className="text-xs font-mono font-bold bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                    {pendingPharmacies.length} en attente
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Les pharmacies ci-dessous ont validé leur code 4 chiffres et soumis leur formulaire. Elles ne sont <strong className="text-amber-300">PAS encore visibles sur l'application</strong>. Cliquez sur <span className="text-emerald-400 font-bold">VALIDER</span> pour les publier officiellement.
+                </p>
+              </div>
+              <button
+                onClick={refreshPending}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 self-start sm:self-auto border border-slate-700"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Actualiser</span>
+              </button>
+            </div>
+
+            {pendingPharmacies.length === 0 ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-500 space-y-2">
+                <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500/50 mb-2" />
+                <h3 className="text-sm font-bold text-slate-300">Aucune souscription en attente</h3>
+                <p className="text-xs text-slate-500">Toutes les officines enregistrées ont été traitées ou publiées.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {pendingPharmacies.map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-slate-900 border-2 border-amber-500/40 rounded-3xl p-5 shadow-xl space-y-4 hover:border-amber-400 transition-all relative overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] font-mono uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                          À VALIDER PAR LE SUPER ADMIN
+                        </span>
+                        <h3 className="text-base font-black text-white mt-1.5">{item.nom}</h3>
+                        <p className="text-xs text-slate-400">Responsable : {item.titulaire || 'Non précisé'}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center font-bold text-lg">
+                        🏥
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 text-xs bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span className="text-slate-500">Email :</span>
+                        <span className="font-mono text-white">{item.email_pro || 'N/A'}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span className="text-slate-500">Téléphone :</span>
+                        <span className="font-mono text-emerald-400 font-bold">{item.phone || 'N/A'}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span className="text-slate-500">Quartier / Emplacement :</span>
+                        <span className="text-white font-medium">{item.quartier || item.adresse || 'Lomé'}</span>
+                      </div>
+                      {item.lat && item.lng && (
+                        <div className="flex items-center justify-between text-slate-300">
+                          <span className="text-slate-500">GPS :</span>
+                          <span className="font-mono text-[11px] text-sky-400">
+                            {Number(item.lat).toFixed(5)}, {Number(item.lng).toFixed(5)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-slate-800">
+                        <span className="text-slate-500">Date soumission :</span>
+                        <span className="font-mono text-[11px] text-slate-400">
+                          {new Date(item.created_at || Date.now()).toLocaleString('fr-FR')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={() => handleApprovePharmacy(item.id)}
+                        className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>VALIDER ET PUBLIER SUR L'APPLICATION</span>
+                      </button>
+                      <button
+                        onClick={() => handleRejectPharmacy(item.id)}
+                        className="py-3 px-3.5 rounded-xl bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-500/30 text-xs font-bold transition-all cursor-pointer"
+                        title="Refuser cette souscription"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CONTENU ONGLET 2 : NOUVEAUX ABONNEMENTS / PAIEMENTS 25.000 FCFA & CODES 4 CHIFFRES */}
+        {activeTab === 'abonnements' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <span>💳 Demandes de Paiement & Codes 4 chiffres (25.000 FCFA)</span>
+                  <span className="text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                    {demandesAbonnement.length} demande(s)
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  1. Le pharmacien clique "Payer 25.000F via WhatsApp" sur l'application.<br />
+                  2. Une demande apparaît ici automatiquement. Vous vérifiez le reçu T-Money / Moov Money reçu sur WhatsApp.<br />
+                  3. Cliquez sur <strong className="text-emerald-400">"Valider le paiement & Générer code 4 chiffres"</strong>.<br />
+                  4. Envoyez le code généré au pharmacien par WhatsApp pour qu'il débloque son formulaire d'inscription.
+                </p>
+              </div>
+              <button
+                onClick={refreshDemandes}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 self-start sm:self-auto border border-slate-700"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Actualiser</span>
+              </button>
+            </div>
+
+            {demandesAbonnement.length === 0 ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-500 space-y-2">
+                <CreditCard className="w-12 h-12 mx-auto text-slate-600 mb-2" />
+                <h3 className="text-sm font-bold text-slate-300">Aucune demande d'abonnement pour le moment</h3>
+                <p className="text-xs text-slate-500">Les demandes créées lors du clic sur le bouton WhatsApp apparaîtront ici.</p>
+              </div>
+            ) : (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs sm:text-sm">
+                    <thead className="bg-slate-950 text-slate-400 text-[11px] uppercase font-mono tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="py-3.5 px-4 font-bold">Date</th>
+                        <th className="py-3.5 px-4 font-bold">Pharmacie</th>
+                        <th className="py-3.5 px-4 font-bold">Numéro WhatsApp</th>
+                        <th className="py-3.5 px-4 font-bold">Montant</th>
+                        <th className="py-3.5 px-4 font-bold">Statut & Code</th>
+                        <th className="py-3.5 px-4 font-bold text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-sans">
+                      {demandesAbonnement.map((d) => {
+                        const dateFormatted = new Date(d.created_at || Date.now()).toLocaleString('fr-FR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+                        const currentCode = d.code_validation || generatedCodes[d.id];
+                        const isEnAttente = d.statut === 'en_attente';
+
+                        // Lien WhatsApp pré-rempli pour envoyer le code 4 chiffres
+                        const cleanPhone = (d.telephone || '').replace(/[^0-9]/g, '');
+                        const waMsg = encodeURIComponent(
+                          `Bonjour ${d.nom_pharmacie},\nVotre paiement de 25 000 FCFA a été validé avec succès par EFA Garde Togo.\n\nVoici votre CODE SECRET À 4 CHIFFRES pour débloquer votre enregistrement : *${currentCode}*\n\nEntrez ce code sur la page de paiement pour accéder au formulaire officiel d'enregistrement.`
+                        );
+                        const waLink = `https://wa.me/${cleanPhone.startsWith('228') ? cleanPhone : '228' + cleanPhone}?text=${waMsg}`;
+
+                        return (
+                          <tr key={d.id} className="hover:bg-slate-850/50 transition-colors">
+                            <td className="py-3.5 px-4 font-mono text-xs text-slate-400 whitespace-nowrap">
+                              {dateFormatted}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className="font-black text-white text-sm">{d.nom_pharmacie}</span>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-xs text-emerald-400 font-bold">
+                              {d.telephone || 'Non précisé'}
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-xs font-bold text-amber-300">
+                              {d.montant?.toLocaleString('fr-FR') || '25 000'} FCFA
+                            </td>
+                            <td className="py-3.5 px-4">
+                              {isEnAttente ? (
+                                <span className="inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                                  En attente paiement
+                                </span>
+                              ) : (
+                                <div className="space-y-1">
+                                  <span className="inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                    Paiement Validé
+                                  </span>
+                                  {currentCode && (
+                                    <div className="flex items-center gap-1.5 font-mono text-xs bg-slate-950 px-2 py-1 rounded-lg border border-emerald-500/30">
+                                      <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span className="text-white font-black tracking-widest text-sm">{currentCode}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 text-right">
+                              <div className="flex items-center justify-end gap-2 flex-wrap">
+                                {isEnAttente ? (
+                                  <button
+                                    onClick={() => handleValidatePaymentAndGenerateCode(d)}
+                                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+                                  >
+                                    <KeyRound className="w-3.5 h-3.5" />
+                                    <span>Valider paiement & Générer code</span>
+                                  </button>
+                                ) : (
+                                  <>
+                                    <a
+                                      href={waLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs"
+                                    >
+                                      <Send className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span>Envoyer code par WhatsApp</span>
+                                    </a>
+                                    <button
+                                      onClick={() => handleValidatePaymentAndGenerateCode(d)}
+                                      className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold cursor-pointer"
+                                      title="Régénérer un nouveau code 4 chiffres"
+                                    >
+                                      Régénérer
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CONTENU ONGLET 3 : GESTION PHARMACIES VALIDÉES */}
+        {activeTab === 'pharmacies' && (
+          <div className="space-y-6 animate-in fade-in">
             {/* STATS EN HAUT : Total, Actifs, Inactifs, Clients Inscrits */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {/* Total */}
@@ -1001,11 +1393,14 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
             </div>
           )}
         </div>
-      </>
-    ) : (
-          <div className="space-y-6 animate-in fade-in">
-            {/* SIGNALEMENTS STATS */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 sm:gap-4">
+      </div>
+    )}
+
+    {/* CONTENU ONGLET 4 : SIGNALEMENTS & MODÉRATION */}
+    {activeTab === 'signalements' && (
+      <div className="space-y-6 animate-in fade-in">
+        {/* SIGNALEMENTS STATS */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 sm:gap-4">
               <div className="bg-slate-900 border border-red-500/30 rounded-3xl p-5 shadow-lg flex items-center justify-between bg-gradient-to-br from-slate-900 to-red-950/20">
                 <div>
                   <span className="text-xs uppercase font-extrabold text-red-400 tracking-wider">

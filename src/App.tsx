@@ -276,6 +276,19 @@ export default function App() {
     }
   }, [currentPath, isSuperAdminUser]);
 
+  // SECURITE CLIENT : Accès non libre, Nom + Numéro obligatoires.
+  useEffect(() => {
+    const isClientRoute = currentPath === '/client';
+    if (isClientRoute && !isPharmaUser) {
+      const hasClientData = Boolean(
+        localStorage.getItem('efa_client_nom') && localStorage.getItem('efa_client_whatsapp')
+      );
+      if (!hasClientData) {
+        navigateTo('/client/login');
+      }
+    }
+  }, [currentPath, isPharmaUser]);
+
   // AUTO REDIRECTION AU DÉMARRAGE (useEffect)
   useEffect(() => {
     const activeRoute = getRouteFromLocation();
@@ -380,20 +393,19 @@ export default function App() {
   // 0. LEGAL CONSENT ACCEPTED (Premier Lancement)
   const handleLegalConsentAccepted = () => {
     setShowLegalConsent(false);
+    const existingNom = localStorage.getItem('efa_client_nom');
+    const existingPhone = localStorage.getItem('efa_client_whatsapp');
     const storedRole =
       localStorage.getItem('efa_garde_role') || localStorage.getItem('role');
-    if (!storedRole) {
-      localStorage.setItem('role', 'client');
-      localStorage.setItem('efa_garde_role', 'client');
-      const guestSession = {
-        role: 'client' as const,
-        phone: 'Client Lomé',
-        createdAt: new Date().toISOString(),
-      };
-      setSession(guestSession);
-      setLocalSession(guestSession);
+
+    if (storedRole === 'client' && existingNom && existingPhone) {
       setShowWelcomeModal(false);
       navigateTo('/client');
+    } else if (storedRole === 'pharma') {
+      setShowWelcomeModal(false);
+      navigateTo('/pharma/dashboard');
+    } else {
+      setShowWelcomeModal(true);
     }
   };
 

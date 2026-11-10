@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Pharmacie, Garde, Conversation, Message, PresenceState, PlanType, PharmaciePending, Pub, PharmacyDailyStat, Signalement, Client, Abonnement } from '../types';
+import { Pharmacie, Garde, Conversation, Message, PresenceState, PlanType, PharmaciePending, Pub, PharmacyDailyStat, Signalement, Client, Abonnement, DemandeAbonnement } from '../types';
 import { supabase } from '../lib/supabase';
 import { validateUploadedFile } from '../utils/security';
 
@@ -94,6 +94,51 @@ export function getSupabaseClient(): SupabaseClient | null {
    Local fallback / Hybrid helpers
    =============================== */
 
+export function isDemoPharmacy(p: Partial<Pharmacie> | null | undefined): boolean {
+  if (!p) return true;
+  const demoIds = new Set(['pharma-1', 'pharma-2', 'pharma-3', 'pharma-4', 'pharma-5', 'pharma-6', 'pharma-7']);
+  if (p.id && demoIds.has(p.id)) return true;
+  const demoNames = [
+    'pharmacie du grand marché',
+    'pharmacie de l’espérance',
+    'pharmacie de l\'espérance',
+    'pharmacie de la victoire',
+    'pharmacie de la paix',
+    'pharmacie du 13 janvier',
+    'pharmacie baguida',
+    'pharmacie hédzranawoé',
+    'pharmacie tokoin central',
+  ];
+  if (p.nom && demoNames.includes(p.nom.trim().toLowerCase())) return true;
+  return false;
+}
+
+export function purgeDemoData(): void {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_PHARMACIES);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter((p: any) => !isDemoPharmacy(p));
+        localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(cleaned));
+      }
+    }
+    const rawConv = localStorage.getItem(LOCAL_STORAGE_CONVERSATIONS);
+    if (rawConv) {
+      const convs = JSON.parse(rawConv);
+      if (Array.isArray(convs)) {
+        const demoIds = new Set(['pharma-1', 'pharma-2', 'pharma-3', 'pharma-4', 'pharma-5', 'pharma-6', 'pharma-7']);
+        const cleanedConvs = convs.filter((c: any) => !demoIds.has(c.pharmacy_id));
+        localStorage.setItem(LOCAL_STORAGE_CONVERSATIONS, JSON.stringify(cleanedConvs));
+      }
+    }
+  } catch {}
+}
+
+if (typeof window !== 'undefined') {
+  purgeDemoData();
+}
+
 export function loadPharmacies(): Pharmacie[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_PHARMACIES);
@@ -103,6 +148,7 @@ export function loadPharmacies(): Pharmacie[] {
         const uniqueMap = new Map<string, Pharmacie>();
         for (const p of parsed) {
           if (!p || !p.id) continue;
+          if (isDemoPharmacy(p)) continue;
           if (uniqueMap.has(p.id)) continue;
           uniqueMap.set(p.id, p);
         }
@@ -356,8 +402,10 @@ export async function registerClientInDB(data: {
         .upsert({
           id: clientObj.id,
           nom: clientObj.nom,
+          numero: clientObj.numero_whatsapp,
           numero_whatsapp: clientObj.numero_whatsapp,
           date_inscription: clientObj.date_inscription,
+          created_at: clientObj.date_inscription,
         })
         .then(() => {}, () => {});
 
@@ -395,6 +443,255 @@ export async function fetchClientsCount(): Promise<number> {
     }
   } catch {}
   return loadClients().length;
+}
+
+/* =========================================================
+   GESTION DES DEMANDES D'ABONNEMENT & PAIEMENT 25.000 FCFA
+   (Code 4 chiffres généré par le Super Admin & validé en DB)
+   ========================================================= */
+
+const LOCAL_STORAGE_DEMANDES_ABONNEMENT = 'efa_demandes_abonnement_v1';
+
+export function loadDemandesAbonnement(): DemandeAbonnement[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_DEMANDES_ABONNEMENT);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) return list;
+    }
+  } catch {}
+  return [];
+}
+
+export function saveDemandesAbonnement(list: DemandeAbonnement[]): void {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_DEMANDES_ABONNEMENT, JSON.stringify(list));
+    notifyChange();
+  } catch {}
+}
+
+export async function fetchDemandesAbonnement(): Promise<DemandeAbonnement[]> {
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { data, error } = await sb
+        .from('abonnements')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data && Array.isArray(data)) {
+        const mapped: DemandeAbonnement[] = data.map((d: any) => ({
+          id: d.id,
+          nom_pharmacie: d.nom_pharmacie || d.pharmacie_nom || 'Pharmacie',
+          telephone: d.telephone || d.phone || '',
+          email: d.email,
+          montant: Number(d.montant) || 25000,
+          plan: d.plan || 'enregistrement_25k',
+          statut: d.statut === 'paye_valide' || d.statut === 'active' ? 'paye_valide' : (d.statut || 'en_attente'),
+          code_validation: d.code_validation,
+          created_at: d.created_at || new Date().toISOString(),
+          validated_at: d.validated_at,
+          pharmacie_id: d.pharmacie_id,
+        }));
+        saveDemandesAbonnement(mapped);
+        return mapped;
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA] fetchDemandesAbonnement warning:', err);
+  }
+  return loadDemandesAbonnement();
+}
+
+/**
+ * Crée automatiquement une demande dans Supabase > abonnements (25.000 FCFA)
+ * Déclenchée au clic "Payer 25.000F via WhatsApp"
+ */
+export async function createSubscriptionPaymentRequest(data: {
+  nom_pharmacie: string;
+  telephone: string;
+  email?: string;
+  montant?: number;
+}): Promise<DemandeAbonnement> {
+  const cleanNom = data.nom_pharmacie.trim();
+  const cleanPhone = data.telephone.trim().replace(/\s+/g, '');
+  const now = new Date().toISOString();
+  const id = 'sub-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+
+  const demande: DemandeAbonnement = {
+    id,
+    nom_pharmacie: cleanNom,
+    telephone: cleanPhone,
+    email: data.email?.trim() || undefined,
+    montant: data.montant || 25000,
+    plan: 'enregistrement_25k',
+    statut: 'en_attente',
+    created_at: now,
+  };
+
+  const list = loadDemandesAbonnement().filter((d) => d.telephone !== cleanPhone && d.id !== id);
+  list.unshift(demande);
+  saveDemandesAbonnement(list);
+
+  // Synchronisation Supabase table abonnements
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      await sb.from('abonnements').insert([
+        {
+          id: demande.id,
+          pharmacie_id: 'pending-' + cleanNom.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          nom_pharmacie: demande.nom_pharmacie,
+          telephone: demande.telephone,
+          email: demande.email || null,
+          montant: demande.montant,
+          plan: demande.plan,
+          statut: 'en_attente',
+          created_at: demande.created_at,
+          expire_le: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        },
+      ]);
+    }
+  } catch (err) {
+    console.warn('[EFA] createSubscriptionPaymentRequest supabase warning:', err);
+  }
+
+  notifyChange();
+  return demande;
+}
+
+/**
+ * Super Admin valide le paiement et génère un code secret à 4 chiffres
+ */
+export async function validateSubscriptionPaymentAndGenerateCode(
+  demandeId: string,
+  customCode?: string
+): Promise<{ code: string; demande: DemandeAbonnement | null }> {
+  // Générer code à 4 chiffres sécurisé (1000 - 9999)
+  const code = customCode || Math.floor(1000 + Math.random() * 9000).toString();
+  const now = new Date().toISOString();
+
+  const list = loadDemandesAbonnement();
+  const found = list.find((d) => d.id === demandeId);
+  if (found) {
+    found.statut = 'paye_valide';
+    found.code_validation = code;
+    found.validated_at = now;
+    saveDemandesAbonnement(list);
+  }
+
+  // Stocker dans la table des codes validés pour vérification ultra-rapide
+  try {
+    const codesRaw = localStorage.getItem('efa_validated_codes_v1');
+    const codesMap: Record<string, any> = codesRaw ? JSON.parse(codesRaw) : {};
+    codesMap[code] = {
+      demandeId,
+      nom_pharmacie: found?.nom_pharmacie,
+      telephone: found?.telephone,
+      validated_at: now,
+    };
+    localStorage.setItem('efa_validated_codes_v1', JSON.stringify(codesMap));
+  } catch {}
+
+  // Synchronisation Supabase table abonnements
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      await sb
+        .from('abonnements')
+        .update({
+          statut: 'paye_valide',
+          code_validation: code,
+          updated_at: now,
+        })
+        .eq('id', demandeId);
+    }
+  } catch (err) {
+    console.warn('[EFA] validateSubscriptionPaymentAndGenerateCode supabase warning:', err);
+  }
+
+  notifyChange();
+  return { code, demande: found || null };
+}
+
+/**
+ * Vérification du code 4 chiffres saisi par le pharmacien sur la page de paiement
+ * Code faux = bloqué | Code bon = débloque suite
+ */
+export async function verifyRegistrationCode(
+  code: string,
+  telephone?: string
+): Promise<{ valid: boolean; demande?: DemandeAbonnement; error?: string }> {
+  const cleanCode = code.trim();
+  if (!cleanCode || cleanCode.length !== 4) {
+    return { valid: false, error: 'Veuillez saisir un code à 4 chiffres valide.' };
+  }
+
+  // 1. Vérification Supabase en direct
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { data, error } = await sb
+        .from('abonnements')
+        .select('*')
+        .eq('code_validation', cleanCode)
+        .in('statut', ['paye_valide', 'active'])
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        const row = data[0];
+        const demande: DemandeAbonnement = {
+          id: row.id,
+          nom_pharmacie: row.nom_pharmacie || 'Pharmacie',
+          telephone: row.telephone || '',
+          email: row.email,
+          montant: row.montant || 25000,
+          plan: row.plan,
+          statut: 'paye_valide',
+          code_validation: cleanCode,
+          created_at: row.created_at,
+        };
+        return { valid: true, demande };
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA] verifyRegistrationCode supabase warning:', err);
+  }
+
+  // 2. Vérification cache local
+  const list = loadDemandesAbonnement();
+  const localMatch = list.find(
+    (d) => d.code_validation === cleanCode && (d.statut === 'paye_valide' || d.statut === 'en_attente')
+  );
+  if (localMatch) {
+    return { valid: true, demande: localMatch };
+  }
+
+  // 3. Vérification map des codes validés
+  try {
+    const codesRaw = localStorage.getItem('efa_validated_codes_v1');
+    if (codesRaw) {
+      const codesMap = JSON.parse(codesRaw);
+      if (codesMap[cleanCode]) {
+        return {
+          valid: true,
+          demande: {
+            id: codesMap[cleanCode].demandeId || 'code-' + cleanCode,
+            nom_pharmacie: codesMap[cleanCode].nom_pharmacie || 'Pharmacie',
+            telephone: codesMap[cleanCode].telephone || '',
+            montant: 25000,
+            statut: 'paye_valide',
+            code_validation: cleanCode,
+            created_at: new Date().toISOString(),
+          },
+        };
+      }
+    }
+  } catch {}
+
+  return {
+    valid: false,
+    error: 'Code à 4 chiffres invalide ou paiement non encore validé par l\'administrateur.',
+  };
 }
 
 /**
@@ -1387,12 +1684,13 @@ export async function addPendingPharmacy(
   list.unshift(newPending);
   savePendingPharmacies(list);
 
-  // Sync avec la table Supabase pharmacies_pending
+  // Sync avec la table Supabase pharmacies_pending et pharmacies
   try {
     const client = getSupabaseClient();
     if (client) {
-      const { error } = await client.from('pharmacies_pending').insert([
+      await client.from('pharmacies_pending').insert([
         {
+          id: newPending.id,
           nom: entry.nom,
           quartier: entry.quartier,
           adresse: entry.adresse,
@@ -1403,12 +1701,26 @@ export async function addPendingPharmacy(
           photo_url: entry.photo_url || null,
           statut: 'pending',
         },
-      ]);
-      if (error) {
-        console.warn('[EFA GARDE] pharmacies_pending insert warning:', error.message);
-      } else {
-        console.log('[EFA GARDE] ✅ Pharmacie ajoutée dans la table pharmacies_pending !');
-      }
+      ]).then(() => {}, () => {});
+
+      // S'assure que la pharmacie est créée avec statut pending (invisible pour les clients)
+      await client.from('pharmacies').upsert([
+        {
+          id: newPending.id,
+          nom: entry.nom,
+          quartier: entry.quartier,
+          adresse: entry.adresse,
+          tel: entry.phone,
+          titulaire: entry.titulaire,
+          lat: entry.lat,
+          lng: entry.lng,
+          photo_url: entry.photo_url || null,
+          email_pro: entry.email_pro,
+          statut: 'pending',
+          is_active: false,
+          is_pending: true,
+        },
+      ]).then(() => {}, () => {});
     }
   } catch (err) {
     console.warn('[EFA GARDE] pharmacies_pending offline fallback:', err);
@@ -1418,52 +1730,122 @@ export async function addPendingPharmacy(
   return newPending;
 }
 
+/**
+ * Seules les pharmacies approuvées et validées par le Super Admin sont visibles sur l'application publique !
+ * Avant validation, les officines enregistrées restent 100% invisibles sur la carte et la liste.
+ */
 export function loadAllPharmaciesWithPending(): Pharmacie[] {
-  const approved = loadPharmacies();
-  const seenIds = new Set<string>();
-  const seenNames = new Set<string>();
+  return loadApprovedPharmacies();
+}
 
-  const cleanedApproved: Pharmacie[] = [];
-  for (const p of approved) {
-    if (!p || !p.id || seenIds.has(p.id)) continue;
-    seenIds.add(p.id);
-    if (p.nom) seenNames.add(p.nom.trim().toLowerCase());
-    cleanedApproved.push(p);
-  }
+export function loadApprovedPharmacies(): Pharmacie[] {
+  const all = loadPharmacies();
+  return all.filter((p) => {
+    if (isDemoPharmacy(p)) return false;
+    if (p.is_pending === true) return false;
+    if (p.statut === 'pending' || p.statut === 'en_attente' || p.statut === 'rejected') return false;
+    if (p.is_active === false) return false;
+    return true;
+  });
+}
 
-  const pending = loadPendingPharmacies().filter(
-    (p) => p.statut === 'pending' || p.statut === 'en_attente'
-  );
+/**
+ * Super Admin valide l'inscription de l'officine ("Quelqu'un a souscrit")
+ * Seulement après validation, l'officine devient visible sur l'application publique !
+ */
+export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
+  const allPharmacies = loadPharmacies();
+  let found = allPharmacies.find((p) => p.id === id);
 
-  const pendingAsPharmacies: Pharmacie[] = [];
-  for (const p of pending) {
-    if (!p || !p.id) continue;
-    // Don't duplicate if already in approved list (by ID or exact name)
-    if (seenIds.has(p.id) || (p.nom && seenNames.has(p.nom.trim().toLowerCase()))) {
-      continue;
+  const pendingList = loadPendingPharmacies();
+  const pendingItem = pendingList.find((p) => p.id === id);
+
+  if (pendingItem) {
+    if (!found) {
+      found = {
+        id: pendingItem.id,
+        nom: pendingItem.nom,
+        tel: pendingItem.phone,
+        lat: pendingItem.lat,
+        lng: pendingItem.lng,
+        adresse: pendingItem.adresse,
+        quartier: pendingItem.quartier,
+        titulaire: pendingItem.titulaire,
+        email_pro: pendingItem.email_pro,
+        plan: 'free',
+        is_online: true,
+        is_active: true,
+        is_pending: false,
+        statut: 'approved',
+        photo_url: pendingItem.photo_url,
+      };
+      allPharmacies.unshift(found);
+    } else {
+      found.is_active = true;
+      found.is_pending = false;
+      found.statut = 'approved';
     }
-
-    seenIds.add(p.id);
-    if (p.nom) seenNames.add(p.nom.trim().toLowerCase());
-
-    pendingAsPharmacies.push({
-      id: p.id,
-      nom: p.nom,
-      tel: p.phone,
-      lat: p.lat,
-      lng: p.lng,
-      adresse: `${p.adresse} (${p.quartier || 'Lomé'})`,
-      plan: 'free',
-      is_online: false,
-      is_pending: true,
-      statut: 'pending',
-      quartier: p.quartier,
-      titulaire: p.titulaire,
-      photo_url: p.photo_url,
-    });
+    const updatedPending = pendingList.filter((p) => p.id !== id);
+    savePendingPharmacies(updatedPending);
+  } else if (found) {
+    found.is_active = true;
+    found.is_pending = false;
+    found.statut = 'approved';
   }
 
-  return [...cleanedApproved, ...pendingAsPharmacies];
+  savePharmacies(allPharmacies);
+
+  // Synchronisation Supabase : la pharmacie devient approved et is_active = true
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      if (found) {
+        await sb.from('pharmacies').upsert({
+          id: found.id,
+          nom: found.nom,
+          tel: found.tel,
+          lat: found.lat,
+          lng: found.lng,
+          adresse: found.adresse,
+          quartier: found.quartier,
+          titulaire: found.titulaire,
+          email_pro: found.email_pro,
+          is_active: true,
+          is_pending: false,
+          statut: 'approved',
+          photo_url: found.photo_url || null,
+        });
+      }
+      await sb.from('pharmacies_pending').update({ statut: 'approved' }).eq('id', id).then(() => {}, () => {});
+    }
+  } catch (err) {
+    console.warn('[EFA] approvePharmacySuperAdmin supabase warning:', err);
+  }
+
+  notifyChange();
+  return true;
+}
+
+/**
+ * Super Admin refuse une demande de pharmacie
+ */
+export async function rejectPharmacySuperAdmin(id: string): Promise<boolean> {
+  const pendingList = loadPendingPharmacies().filter((p) => p.id !== id);
+  savePendingPharmacies(pendingList);
+
+  const allPharmacies = loadPharmacies().filter((p) => p.id !== id);
+  savePharmacies(allPharmacies);
+
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      await sb.from('pharmacies_pending').update({ statut: 'rejected' }).eq('id', id).then(() => {}, () => {});
+      await sb.from('pharmacies').update({ statut: 'rejected', is_active: false }).eq('id', id).then(() => {}, () => {});
+    }
+  } catch {}
+
+  notifyChange();
+  return true;
 }
 
 /* ===============================
@@ -1886,3 +2268,103 @@ function getPharmacyStatsCalculated(
     dailyStats30Days,
   };
 }
+
+/* =========================================================
+   SYNCHRONISATION REALTIME SUPABASE GLOBALE (6 TABLES)
+   abonnements, conversations, messages, pharmacies, utilisateurs, clients
+   ========================================================= */
+
+let globalRealtimeInitialized = false;
+
+export function initSupabaseRealtime(): void {
+  if (globalRealtimeInitialized || typeof window === 'undefined') return;
+  const sb = getSupabaseClient();
+  if (!sb) return;
+
+  try {
+    globalRealtimeInitialized = true;
+    sb.channel('efa_realtime_all_tables')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages' },
+        (payload: any) => {
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const newMsg = payload.new;
+            const convId = newMsg.conversation_id;
+            if (convId) {
+              const allRaw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
+              const all: Record<string, Message[]> = allRaw ? JSON.parse(allRaw) : {};
+              const list = all[convId] || [];
+              if (!list.some((m) => m.id === newMsg.id)) {
+                list.push({
+                  id: newMsg.id,
+                  conversation_id: convId,
+                  sender: newMsg.sender || (newMsg.sender_type === 'pharma' ? 'pharma' : 'client'),
+                  sender_id: newMsg.sender_id,
+                  receiver_id: newMsg.receiver_id,
+                  text: newMsg.text || newMsg.content || '',
+                  content: newMsg.content || newMsg.text || '',
+                  created_at: newMsg.created_at || new Date().toISOString(),
+                  expires_at: newMsg.expires_at,
+                  is_read: Boolean(newMsg.is_read),
+                  type: newMsg.type || 'text',
+                  media_url: newMsg.media_url,
+                  audio_duration: newMsg.audio_duration,
+                });
+                all[convId] = list;
+                localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
+              }
+            }
+          }
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'conversations' },
+        () => {
+          fetchConversations().catch(() => {});
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pharmacies' },
+        () => {
+          fetchPharmacies().catch(() => {});
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'abonnements' },
+        () => {
+          fetchDemandesAbonnement().catch(() => {});
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clients' },
+        () => {
+          fetchClientsCount().catch(() => {});
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'utilisateurs' },
+        () => {
+          notifyChange();
+        }
+      )
+      .subscribe();
+  } catch (err) {
+    console.warn('[EFA] initSupabaseRealtime global error:', err);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  initSupabaseRealtime();
+}
+
