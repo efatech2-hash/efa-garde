@@ -314,19 +314,30 @@ export async function activateSubscriptionInDB(
         console.warn('[EFA GARDE] Error updating pharmacy subscription in DB:', error);
       }
 
-      // Synchronisation table abonnements
+      // Synchronisation table abonnements (renouveler au lieu de créer un doublon)
+      const currentPharma = loadPharmacies().find((p) => p.id === pharmacyId);
+      const pharmaNom = updates.nom || currentPharma?.nom || 'Pharmacie';
       await client
         .from('abonnements')
-        .insert({
-          entreprise_id: pharmacyId,
-          pharmacie_id: pharmacyId,
-          plan: updates.plan || 'populaire_mensuel',
-          statut: 'actif',
-          montant: updates.prix || 15000,
-          date_debut: now.toISOString(),
-          expire_le: end.toISOString(),
-        })
-        .then(() => {}, () => {});
+        .upsert(
+          {
+            entreprise_id: pharmacyId,
+            pharmacie_id: pharmacyId,
+            nom_pharmacie: pharmaNom,
+            telephone: currentPharma?.tel || undefined,
+            email: currentPharma?.email_pro || undefined,
+            plan: updates.plan || 'populaire_mensuel',
+            statut: 'actif',
+            montant: updates.prix || 15000,
+            date_debut: now.toISOString(),
+            expire_le: end.toISOString(),
+            updated_at: now.toISOString(),
+          },
+          { onConflict: 'entreprise_id' }
+        )
+        .then(() => {}, (err) => {
+          console.warn('[EFA GARDE] Upsert abonnements error:', err);
+        });
     }
   } catch (err) {
     console.warn('[EFA GARDE] Failed to update DB:', err);
@@ -535,10 +546,12 @@ const id = crypto.randomUUID();
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      await sb.from('abonnements').insert([
+      const entrepriseId = 'pending-' + cleanNom.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      await sb.from('abonnements').upsert(
         {
           id: demande.id,
-          pharmacie_id: 'pending-' + cleanNom.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          entreprise_id: entrepriseId,
+          pharmacie_id: entrepriseId,
           nom_pharmacie: demande.nom_pharmacie,
           telephone: demande.telephone,
           email: demande.email || null,
@@ -546,9 +559,11 @@ const id = crypto.randomUUID();
           plan: demande.plan,
           statut: 'en_attente',
           created_at: demande.created_at,
+          updated_at: demande.created_at,
           expire_le: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
         },
-      ]);
+        { onConflict: 'entreprise_id' }
+      );
     }
   } catch (err) {
     console.warn('[EFA] createSubscriptionPaymentRequest supabase warning:', err);
