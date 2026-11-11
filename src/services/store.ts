@@ -515,8 +515,7 @@ export async function createSubscriptionPaymentRequest(data: {
   const cleanNom = data.nom_pharmacie.trim();
   const cleanPhone = data.telephone.trim().replace(/\s+/g, '');
   const now = new Date().toISOString();
-  const id = 'sub-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
-
+const id = crypto.randomUUID();
   const demande: DemandeAbonnement = {
     id,
     nom_pharmacie: cleanNom,
