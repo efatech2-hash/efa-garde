@@ -2172,18 +2172,36 @@ export function trackPresence(
 /* =========================================================
    SYNCHRONISATION REALTIME SUPABASE GLOBALE (6 TABLES)
    abonnements, conversations, messages, pharmacies, utilisateurs, clients
+   - Un seul subscribe, avec try/catch
+   - Pas de boucle si websocket échoue
+   - Mode polling 30s de secours
    ========================================================= */
 
-let globalRealtimeInitialized = false;
+let globalRealtimeAttempted = false;
+let pollingInterval: any = null;
+
+function startBackgroundPolling(): void {
+  if (pollingInterval || typeof window === 'undefined') return;
+  pollingInterval = setInterval(() => {
+    fetchApprovedPharmacies().catch(() => {});
+    fetchClientsCount().catch(() => {});
+    fetchDemandesAbonnement().catch(() => {});
+    fetchConversations().catch(() => {});
+  }, 30000);
+}
 
 export function initSupabaseRealtime(): void {
-  if (globalRealtimeInitialized || typeof window === 'undefined') return;
+  if (globalRealtimeAttempted || typeof window === 'undefined') return;
+  globalRealtimeAttempted = true;
+
   const sb = getSupabaseClient();
-  if (!sb) return;
+  if (!sb) {
+    startBackgroundPolling();
+    return;
+  }
 
   try {
-    globalRealtimeInitialized = true;
-    sb.channel('efa_realtime_all_tables')
+    const channel = sb.channel('efa_realtime_all_tables')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages' },
@@ -2256,33 +2274,79 @@ export function initSupabaseRealtime(): void {
         () => {
           notifyChange();
         }
-      )
-      .subscribe();
+      );
+
+    channel.subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('REALTIME OK');
+      } else if (
+        status === 'CHANNEL_ERROR' ||
+        status === 'TIMED_OUT' ||
+        status === 'CLOSED' ||
+        err
+      ) {
+        console.warn(
+          '[EFA Realtime] Statut websocket (' +
+            status +
+            '), mode polling 30s actif'
+        );
+        startBackgroundPolling();
+      }
+    });
+
+    console.log('REALTIME OK');
   } catch (err) {
     console.warn('[EFA] initSupabaseRealtime global error:', err);
+    startBackgroundPolling();
   }
 }
 
 /**
  * CHARGEMENT INITIAL DEPUIS SUPABASE :
- * Même si le cache du navigateur est vidé à 100%, cette routine télécharge
- * immédiatement les pharmacies validées, les abonnements, les clients et le chat.
+ * 1. NE PAS await le Realtime.
+ * 2. SELECTs simples en parallèle (pharmacies, clients, abonnements, conversations).
+ * 3. Timeout strict de 3 secondes : si dépassé, affiche quand même l'app.
+ * 4. Ensuite seulement, en arrière-plan, subscribe au websocket.
+ * 5. Pas de boucle si websocket échoue, polling 30s en secours.
  */
+let bootstrapAttempted = false;
+
 export async function bootstrapStoreFromSupabase(): Promise<void> {
+  if (bootstrapAttempted) return;
+  bootstrapAttempted = true;
+
+  const selectQueries = Promise.allSettled([
+    fetchApprovedPharmacies(),
+    fetchPendingPharmacies(),
+    fetchDemandesAbonnement(),
+    fetchClientsCount(),
+    fetchConversations(),
+  ]);
+
+  const timeoutPromise = new Promise<'timeout'>((resolve) =>
+    setTimeout(() => resolve('timeout'), 3000)
+  );
+
   try {
-    await Promise.allSettled([
-      fetchApprovedPharmacies(),
-      fetchPendingPharmacies(),
-      fetchDemandesAbonnement(),
-      fetchClientsCount(),
-      fetchConversations(),
-    ]);
+    const outcome = await Promise.race([selectQueries, timeoutPromise]);
+    if (outcome === 'timeout') {
+      console.warn(
+        '[EFA GARDE] Timeout 3s atteint sur bootstrap, ouverture immédiate avec données disponibles.'
+      );
+    }
   } catch (err) {
     console.warn('[EFA GARDE] bootstrapStoreFromSupabase error:', err);
+  } finally {
+    // Affiche l'app / met à jour les écouteurs de store
+    notifyChange();
+
+    // ENSUITE seulement, en arrière-plan, tu fais supabase.channel().subscribe()
+    setTimeout(() => {
+      initSupabaseRealtime();
+    }, 100);
   }
 }
 
 if (typeof window !== 'undefined') {
-  initSupabaseRealtime();
   bootstrapStoreFromSupabase().catch(() => {});
 }

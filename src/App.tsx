@@ -9,8 +9,7 @@ import {
   loadAllPharmaciesWithPending,
   subscribeToStore,
   cleanExpiredMessages,
-  fetchApprovedPharmacies,
-  initSupabaseRealtime,
+  bootstrapStoreFromSupabase,
 } from './services/store';
 import { getSession, clearSession, setSession } from './lib/auth';
 import { Map } from './pages/Map';
@@ -214,12 +213,7 @@ export default function App() {
 
   // Initial load from Supabase & Subscribe to store updates
   useEffect(() => {
-    fetchApprovedPharmacies().then((data) => {
-      if (data && data.length > 0) {
-        setPharmacies(data);
-      }
-    }).catch(() => {});
-    initSupabaseRealtime();
+    bootstrapStoreFromSupabase().catch(() => {});
 
     const unsubscribe = subscribeToStore(() => {
       setPharmacies(loadAllPharmaciesWithPending());
@@ -461,12 +455,22 @@ export default function App() {
     navigateTo('/pharma/dashboard');
   };
 
+  const appOpenedLoggedRef = useRef(false);
+  if (!showSplash && !appOpenedLoggedRef.current) {
+    appOpenedLoggedRef.current = true;
+    console.log('APP OUVERTE');
+  }
+
   // 1. SPLASH SCREEN: Logo centré sur fond blanc, 1.8s
   if (showSplash) {
     return (
       <Splash
         duration={1800}
         onComplete={() => {
+          if (!appOpenedLoggedRef.current) {
+            appOpenedLoggedRef.current = true;
+            console.log('APP OUVERTE');
+          }
           setShowSplash(false);
           const activeRoute = getRouteFromLocation();
           if (
