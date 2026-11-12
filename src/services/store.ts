@@ -1,27 +1,81 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Pharmacie, Garde, Conversation, Message, PresenceState, PlanType, PharmaciePending, Pub, PharmacyDailyStat, Signalement, Client, Abonnement, DemandeAbonnement } from '../types';
+import {
+  Pharmacie,
+  Garde,
+  Conversation,
+  Message,
+  PresenceState,
+  PlanType,
+  PharmaciePending,
+  Pub,
+  PharmacyDailyStat,
+  Signalement,
+  Client,
+  Abonnement,
+  DemandeAbonnement,
+} from '../types';
 import { supabase } from '../lib/supabase';
 import { validateUploadedFile } from '../utils/security';
 
-const LOCAL_STORAGE_PHARMACIES = 'efa_pharmacies_v1';
-const LOCAL_STORAGE_GARDES = 'efa_gardes_v1';
-const LOCAL_STORAGE_CONVERSATIONS = 'efa_conversations_v1';
-const LOCAL_STORAGE_MESSAGES = 'efa_messages_v1';
-const LOCAL_STORAGE_SIGNALEMENTS = 'efa_signalements_v1';
-const LOCAL_STORAGE_NOTIFICATIONS_ADMIN = 'efa_notifications_admin_v1';
-const LOCAL_STORAGE_SUPABASE_CONFIG = 'efa_supabase_config_v1';
-const LOCAL_STORAGE_STATS = 'efa_pharmacy_stats_v1';
+/* =========================================================
+   EFA GARDE - STORE 100% SUPABASE SANS LOCALSTORAGE DONNÉES
+   - Zéro localStorage pour pharmacies, abonnements, messages,
+     clients, signalements, gardes.
+   - localStorage réservé exclusivement à la session client
+     (nom, numéro, id client, rôle, tokens auth).
+   ========================================================= */
+
+// In-Memory Realtime Cache
+let memoryPharmacies: Pharmacie[] = [];
+let memoryPendingPharmacies: PharmaciePending[] = [];
+let memoryDemandesAbonnement: DemandeAbonnement[] = [];
+let memoryClients: Client[] = [];
+let memoryClientsCount = 0;
+let memoryConversations: Conversation[] = [];
+const memoryMessages: Record<string, Message[]> = {};
+let memorySignalements: Signalement[] = [];
+const memoryGardes: Garde[] = [];
+let memoryPubs: Pub[] = [];
+let memoryStats: PharmacyDailyStat[] = [];
+const memoryValidatedCodes: Record<string, any> = {};
+const memoryItineraryClicks: Record<
+  string,
+  { total: number; dates: Record<string, number> }
+> = {};
+
+// Nettoyage proactif de tout vestige legacy dans localStorage au démarrage
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('efa_pharmacies_v1');
+    localStorage.removeItem('efa_pharmacies_pending_v1');
+    localStorage.removeItem('efa_demandes_abonnement_v1');
+    localStorage.removeItem('efa_clients_v1');
+    localStorage.removeItem('efa_conversations_v1');
+    localStorage.removeItem('efa_messages_v1');
+    localStorage.removeItem('efa_signalements_v1');
+    localStorage.removeItem('efa_gardes_v1');
+    localStorage.removeItem('efa_pubs_v1');
+    localStorage.removeItem('efa_pharmacy_stats_v1');
+    localStorage.removeItem('efa_validated_codes_v1');
+    localStorage.removeItem('efa_itinerary_clicks_v1');
+    localStorage.removeItem('efa_signalements');
+  } catch {
+    // ignore
+  }
+}
 
 // BroadcastChannel for cross-tab realtime synchronization
-const realtimeBus = typeof window !== 'undefined' && 'BroadcastChannel' in window
-  ? new BroadcastChannel('efa_garde_realtime_bus')
-  : null;
+const realtimeBus =
+  typeof window !== 'undefined' && 'BroadcastChannel' in window
+    ? new BroadcastChannel('efa_garde_realtime_bus')
+    : null;
 
 // Local event emitter for intra-page reactivity
 type Listener = () => void;
 const listeners = new Set<Listener>();
-function notifyChange() {
-  listeners.forEach(fn => fn());
+
+export function notifyChange() {
+  listeners.forEach((fn) => fn());
   if (realtimeBus) {
     try {
       realtimeBus.postMessage({ type: 'SYNC' });
@@ -34,7 +88,7 @@ function notifyChange() {
 if (realtimeBus) {
   realtimeBus.onmessage = (event) => {
     if (event.data?.type === 'SYNC') {
-      listeners.forEach(fn => fn());
+      listeners.forEach((fn) => fn());
     }
   };
 }
@@ -47,9 +101,10 @@ export function subscribeToStore(fn: Listener): () => void {
 }
 
 // Presence tracking bus
-const presenceBus = typeof window !== 'undefined' && 'BroadcastChannel' in window
-  ? new BroadcastChannel('efa_garde_presence_bus')
-  : null;
+const presenceBus =
+  typeof window !== 'undefined' && 'BroadcastChannel' in window
+    ? new BroadcastChannel('efa_garde_presence_bus')
+    : null;
 
 interface SupabaseConfig {
   url: string;
@@ -57,15 +112,26 @@ interface SupabaseConfig {
 }
 
 export function getStoredSupabaseConfig(): SupabaseConfig {
-  const envUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
-  
+  const envUrl = (
+    import.meta.env.VITE_SUPABASE_URL ||
+    (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
+    ''
+  ).trim();
+  const envKey = (
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    (typeof process !== 'undefined' &&
+      (process.env?.VITE_SUPABASE_ANON_KEY ||
+        process.env?.VITE_SUPABASE_PUBLISHABLE_KEY)) ||
+    ''
+  ).trim();
+
   if (envUrl && envKey) {
     return { url: envUrl, anonKey: envKey };
   }
 
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_SUPABASE_CONFIG);
+    const raw = localStorage.getItem('efa_supabase_config_v1');
     if (raw) return JSON.parse(raw);
   } catch {
     // fallback
@@ -74,7 +140,10 @@ export function getStoredSupabaseConfig(): SupabaseConfig {
 }
 
 export function saveSupabaseConfig(url: string, anonKey: string) {
-  localStorage.setItem(LOCAL_STORAGE_SUPABASE_CONFIG, JSON.stringify({ url, anonKey }));
+  localStorage.setItem(
+    'efa_supabase_config_v1',
+    JSON.stringify({ url, anonKey })
+  );
   notifyChange();
 }
 
@@ -83,7 +152,10 @@ export function getSupabaseClient(): SupabaseClient | null {
   const config = getStoredSupabaseConfig();
   if (config.url && config.anonKey) {
     if (!activeSupabaseClient) {
-      activeSupabaseClient = createClient(config.url, config.anonKey);
+      activeSupabaseClient = createClient(config.url, config.anonKey, {
+        auth: { persistSession: true, autoRefreshToken: true },
+        realtime: { params: { eventsPerSecond: 10 } },
+      });
     }
     return activeSupabaseClient;
   }
@@ -91,17 +163,27 @@ export function getSupabaseClient(): SupabaseClient | null {
 }
 
 /* ===============================
-   Local fallback / Hybrid helpers
+   Anti-Demo Protection
    =============================== */
 
-export function isDemoPharmacy(p: Partial<Pharmacie> | null | undefined): boolean {
+export function isDemoPharmacy(
+  p: Partial<Pharmacie> | null | undefined
+): boolean {
   if (!p) return true;
-  const demoIds = new Set(['pharma-1', 'pharma-2', 'pharma-3', 'pharma-4', 'pharma-5', 'pharma-6', 'pharma-7']);
+  const demoIds = new Set([
+    'pharma-1',
+    'pharma-2',
+    'pharma-3',
+    'pharma-4',
+    'pharma-5',
+    'pharma-6',
+    'pharma-7',
+  ]);
   if (p.id && demoIds.has(p.id)) return true;
   const demoNames = [
     'pharmacie du grand marché',
     'pharmacie de l’espérance',
-    'pharmacie de l\'espérance',
+    "pharmacie de l'espérance",
     'pharmacie de la victoire',
     'pharmacie de la paix',
     'pharmacie du 13 janvier',
@@ -114,52 +196,13 @@ export function isDemoPharmacy(p: Partial<Pharmacie> | null | undefined): boolea
 }
 
 export function purgeDemoData(): void {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_PHARMACIES);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const cleaned = parsed.filter((p: any) => !isDemoPharmacy(p));
-        localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(cleaned));
-      }
-    }
-    const rawConv = localStorage.getItem(LOCAL_STORAGE_CONVERSATIONS);
-    if (rawConv) {
-      const convs = JSON.parse(rawConv);
-      if (Array.isArray(convs)) {
-        const demoIds = new Set(['pharma-1', 'pharma-2', 'pharma-3', 'pharma-4', 'pharma-5', 'pharma-6', 'pharma-7']);
-        const cleanedConvs = convs.filter((c: any) => !demoIds.has(c.pharmacy_id));
-        localStorage.setItem(LOCAL_STORAGE_CONVERSATIONS, JSON.stringify(cleanedConvs));
-      }
-    }
-  } catch {}
-}
-
-if (typeof window !== 'undefined') {
-  purgeDemoData();
-}
-
-export function loadPharmacies(): Pharmacie[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_PHARMACIES);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const uniqueMap = new Map<string, Pharmacie>();
-        for (const p of parsed) {
-          if (!p || !p.id) continue;
-          if (isDemoPharmacy(p)) continue;
-          if (uniqueMap.has(p.id)) continue;
-          uniqueMap.set(p.id, p);
-        }
-        const result = Array.from(uniqueMap.values());
-        return sortPharmaciesPriority(result);
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return [];
+  memoryPharmacies = memoryPharmacies.filter((p) => !isDemoPharmacy(p));
+  memoryConversations = memoryConversations.filter(
+    (c) =>
+      !['pharma-1', 'pharma-2', 'pharma-3', 'pharma-4', 'pharma-5', 'pharma-6', 'pharma-7'].includes(
+        c.pharmacy_id
+      )
+  );
 }
 
 export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
@@ -195,11 +238,32 @@ export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
   });
 }
 
+/* =========================================================
+   PHARMACIES : 100% SUPABASE TABLE `pharmacies`
+   - Carte publique : SELECT WHERE statut='approved' AND is_active=true
+   - Formulaire pharmacie : INSERT (statut='pending', is_active=false)
+   - Valider et Publier : UPDATE statut='approved', is_active=true
+   ========================================================= */
+
+export function loadPharmacies(): Pharmacie[] {
+  return sortPharmaciesPriority(
+    memoryPharmacies.filter((p) => !isDemoPharmacy(p))
+  );
+}
+
+export function savePharmacies(list: Pharmacie[]) {
+  const uniqueMap = new Map<string, Pharmacie>();
+  for (const item of list) {
+    if (item && item.id && !uniqueMap.has(item.id)) {
+      uniqueMap.set(item.id, item);
+    }
+  }
+  memoryPharmacies = sortPharmaciesPriority(Array.from(uniqueMap.values()));
+  notifyChange();
+}
+
 /**
- * Charge les pharmacies depuis Supabase selon les privilèges officiels :
- * order('is_premium', {ascending:false})
- * order('position', {ascending:true})
- * order('etoile_doree', {ascending:false})
+ * Charge TOUTES les pharmacies depuis Supabase (pour Super Admin)
  */
 export async function fetchPharmacies(): Promise<Pharmacie[]> {
   try {
@@ -212,9 +276,11 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
         .order('position', { ascending: true })
         .order('etoile_doree', { ascending: false });
 
-      if (!error && data && Array.isArray(data) && data.length > 0) {
-        const sorted = sortPharmaciesPriority(data as Pharmacie[]);
-        savePharmacies(sorted);
+      if (!error && data && Array.isArray(data)) {
+        const clean = (data as Pharmacie[]).filter((p) => !isDemoPharmacy(p));
+        const sorted = sortPharmaciesPriority(clean);
+        memoryPharmacies = sorted;
+        notifyChange();
         return sorted;
       }
     }
@@ -224,46 +290,404 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
   return loadPharmacies();
 }
 
-export function savePharmacies(list: Pharmacie[]) {
-  const uniqueMap = new Map<string, Pharmacie>();
-  for (const item of list) {
-    if (item && item.id && !uniqueMap.has(item.id)) {
-      uniqueMap.set(item.id, item);
+/**
+ * CARTE PUBLIQUE : SELECT * FROM public.pharmacies WHERE statut='approved' AND is_active=true UNIQUEMENT
+ * Ne retourne JAMAIS de pharmacies non validées ou refusées aux clients grand public.
+ */
+export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data, error } = await client
+        .from('pharmacies')
+        .select('*')
+        .eq('statut', 'approved')
+        .eq('is_active', true)
+        .order('is_premium', { ascending: false })
+        .order('position', { ascending: true })
+        .order('etoile_doree', { ascending: false });
+
+      if (!error && data && Array.isArray(data)) {
+        const clean = (data as Pharmacie[]).filter((p) => !isDemoPharmacy(p));
+        const sorted = sortPharmaciesPriority(clean);
+
+        // Préserve les non-approuvées déjà en mémoire pour l'admin
+        const pendingOrOther = memoryPharmacies.filter(
+          (p) => p.statut !== 'approved' || !p.is_active
+        );
+        memoryPharmacies = sortPharmaciesPriority([...sorted, ...pendingOrOther]);
+        notifyChange();
+        return sorted;
+      }
     }
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchApprovedPharmacies fallback:', err);
   }
-  const cleanList = sortPharmaciesPriority(Array.from(uniqueMap.values()));
-  localStorage.setItem(LOCAL_STORAGE_PHARMACIES, JSON.stringify(cleanList));
+  return loadApprovedPharmacies();
+}
+
+export function loadApprovedPharmacies(): Pharmacie[] {
+  return memoryPharmacies.filter((p) => {
+    if (isDemoPharmacy(p)) return false;
+    if (p.is_pending === true) return false;
+    if (p.statut !== 'approved') return false;
+    if (p.is_active === false) return false;
+    return true;
+  });
+}
+
+export function loadAllPharmaciesWithPending(): Pharmacie[] {
+  return loadApprovedPharmacies();
+}
+
+/**
+ * Super Admin : Liste des pharmacies en attente de vérification
+ */
+export function loadPendingPharmacies(): PharmaciePending[] {
+  const fromMem = memoryPharmacies
+    .filter(
+      (p) =>
+        !isDemoPharmacy(p) &&
+        (p.statut === 'pending' ||
+          p.statut === 'en_attente' ||
+          p.is_pending === true)
+    )
+    .map((p) => ({
+      id: p.id,
+      nom: p.nom,
+      quartier: p.quartier || 'Lomé',
+      adresse: p.adresse || '',
+      phone: p.tel || '',
+      titulaire: p.titulaire || 'Titulaire Officine',
+      numero_ordre: p.numero_ordre,
+      piece_url: p.piece_url,
+      photo_url: p.photo_url,
+      email_pro: p.email_pro,
+      mot_de_passe: p.mot_de_passe,
+      lat: p.lat || 6.1319,
+      lng: p.lng || 1.2228,
+      statut: 'en_attente' as const,
+      created_at: p.created_at || new Date().toISOString(),
+    }));
+
+  if (fromMem.length > 0) return fromMem;
+  return memoryPendingPharmacies;
+}
+
+export function savePendingPharmacies(list: PharmaciePending[]) {
+  memoryPendingPharmacies = list;
   notifyChange();
 }
 
-export function updatePharmacyStatus(pharmacieId: string, isOnline: boolean): Pharmacie | null {
-  const list = loadPharmacies();
-  const idx = list.findIndex(p => p.id === pharmacieId);
-  if (idx === -1) return null;
-  list[idx] = { ...list[idx], is_online: isOnline };
-  savePharmacies(list);
-  return list[idx];
+export async function fetchPendingPharmacies(): Promise<PharmaciePending[]> {
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data, error } = await client
+        .from('pharmacies')
+        .select('*')
+        .or('statut.eq.pending,statut.eq.en_attente,is_pending.eq.true')
+        .order('created_at', { ascending: false });
+
+      if (!error && data && Array.isArray(data)) {
+        const list: PharmaciePending[] = data.map((p: any) => ({
+          id: p.id,
+          nom: p.nom,
+          quartier: p.quartier || 'Lomé',
+          adresse: p.adresse || '',
+          phone: p.tel || p.phone || '',
+          titulaire: p.titulaire || 'Titulaire Officine',
+          numero_ordre: p.numero_ordre,
+          piece_url: p.piece_url,
+          photo_url: p.photo_url,
+          email_pro: p.email_pro,
+          mot_de_passe: p.mot_de_passe,
+          lat: p.lat || 6.1319,
+          lng: p.lng || 1.2228,
+          statut: 'en_attente',
+          created_at: p.created_at || new Date().toISOString(),
+        }));
+        memoryPendingPharmacies = list;
+        notifyChange();
+        return list;
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchPendingPharmacies fallback:', err);
+  }
+  return loadPendingPharmacies();
 }
 
-export function updatePharmacyPlan(pharmacieId: string, plan: PlanType): Pharmacie | null {
-  const list = loadPharmacies();
-  const idx = list.findIndex(p => p.id === pharmacieId);
+/**
+ * FORMULAIRE PHARMACIE :
+ * INSERT INTO public.pharmacies (statut='pending', is_active=false, is_pending=true)
+ * Reste 100% invisible sur la carte publique jusqu'à validation par le Super Admin.
+ */
+export async function addPendingPharmacy(
+  entry: Omit<PharmaciePending, 'id' | 'statut' | 'created_at'>
+): Promise<PharmaciePending> {
+  const id =
+    'pharma-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  const now = new Date().toISOString();
+
+  const newPending: PharmaciePending = {
+    ...entry,
+    id,
+    statut: 'en_attente',
+    created_at: now,
+  };
+
+  const newPharma: Pharmacie = {
+    id,
+    nom: entry.nom,
+    tel: entry.phone,
+    lat: entry.lat || 6.1319,
+    lng: entry.lng || 1.2228,
+    adresse: entry.adresse,
+    quartier: entry.quartier || 'Lomé',
+    titulaire: entry.titulaire || 'Titulaire Officine',
+    numero_ordre: entry.numero_ordre,
+    piece_url: entry.piece_url,
+    photo_url: entry.photo_url || undefined,
+    email_pro: entry.email_pro,
+    mot_de_passe: entry.mot_de_passe,
+    plan: 'free',
+    is_online: false,
+    is_active: false,
+    is_pending: true,
+    statut: 'pending',
+    created_at: now,
+    updated_at: now,
+  };
+
+  memoryPendingPharmacies.unshift(newPending);
+  memoryPharmacies.unshift(newPharma);
+
+  // Synchronisation directe dans Supabase table pharmacies
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      await client.from('pharmacies').upsert({
+        id,
+        nom: newPharma.nom,
+        tel: newPharma.tel,
+        lat: newPharma.lat,
+        lng: newPharma.lng,
+        adresse: newPharma.adresse,
+        quartier: newPharma.quartier,
+        titulaire: newPharma.titulaire,
+        numero_ordre: newPharma.numero_ordre,
+        piece_url: newPharma.piece_url,
+        photo_url: newPharma.photo_url || null,
+        email_pro: newPharma.email_pro,
+        mot_de_passe: newPharma.mot_de_passe,
+        plan: 'free',
+        is_online: false,
+        is_active: false,
+        is_pending: true,
+        statut: 'pending',
+        created_at: now,
+        updated_at: now,
+      });
+
+      // Table miroir pharmacies_pending
+      await client
+        .from('pharmacies_pending')
+        .upsert({
+          id,
+          nom: entry.nom,
+          quartier: entry.quartier,
+          adresse: entry.adresse,
+          phone: entry.phone,
+          titulaire: entry.titulaire,
+          lat: entry.lat,
+          lng: entry.lng,
+          photo_url: entry.photo_url || null,
+          statut: 'pending',
+          created_at: now,
+        })
+        .then(
+          () => {},
+          () => {}
+        );
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] addPendingPharmacy Supabase warning:', err);
+  }
+
+  notifyChange();
+  return newPending;
+}
+
+/**
+ * VALIDER ET PUBLIER (Super Admin Dashboard) :
+ * UPDATE public.pharmacies SET statut='approved', is_active=true, is_pending=false
+ * Seulement là, la pharmacie devient visible sur la carte publique !
+ */
+export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const found = memoryPharmacies.find((p) => p.id === id);
+  if (found) {
+    found.statut = 'approved';
+    found.is_active = true;
+    found.is_pending = false;
+    found.updated_at = now;
+  }
+  memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
+
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      await client
+        .from('pharmacies')
+        .update({
+          statut: 'approved',
+          is_active: true,
+          is_pending: false,
+          updated_at: now,
+        })
+        .eq('id', id);
+
+      await client
+        .from('pharmacies_pending')
+        .update({ statut: 'approved' })
+        .eq('id', id)
+        .then(
+          () => {},
+          () => {}
+        );
+    }
+  } catch (err) {
+    console.warn('[EFA] approvePharmacySuperAdmin Supabase warning:', err);
+  }
+
+  notifyChange();
+  return true;
+}
+
+export async function rejectPharmacySuperAdmin(id: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const found = memoryPharmacies.find((p) => p.id === id);
+  if (found) {
+    found.statut = 'rejected';
+    found.is_active = false;
+    found.is_pending = false;
+    found.updated_at = now;
+  }
+  memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
+
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      await client
+        .from('pharmacies')
+        .update({
+          statut: 'rejected',
+          is_active: false,
+          is_pending: false,
+          updated_at: now,
+        })
+        .eq('id', id);
+
+      await client
+        .from('pharmacies_pending')
+        .update({ statut: 'rejected' })
+        .eq('id', id)
+        .then(
+          () => {},
+          () => {}
+        );
+    }
+  } catch (err) {
+    console.warn('[EFA] rejectPharmacySuperAdmin warning:', err);
+  }
+
+  notifyChange();
+  return true;
+}
+
+export function updatePharmacyStatus(
+  pharmacieId: string,
+  isOnline: boolean
+): Pharmacie | null {
+  const idx = memoryPharmacies.findIndex((p) => p.id === pharmacieId);
   if (idx === -1) return null;
-  list[idx] = { ...list[idx], plan };
-  savePharmacies(list);
-  return list[idx];
+  memoryPharmacies[idx] = { ...memoryPharmacies[idx], is_online: isOnline };
+
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      sb.from('pharmacies')
+        .update({
+          is_online: isOnline,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', pharmacieId)
+        .then(
+          () => {},
+          () => {}
+        );
+    }
+  } catch {}
+
+  notifyChange();
+  return memoryPharmacies[idx];
+}
+
+export function updatePharmacyPlan(
+  pharmacieId: string,
+  plan: PlanType
+): Pharmacie | null {
+  const idx = memoryPharmacies.findIndex((p) => p.id === pharmacieId);
+  if (idx === -1) return null;
+  memoryPharmacies[idx] = { ...memoryPharmacies[idx], plan };
+
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      sb.from('pharmacies')
+        .update({
+          plan,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', pharmacieId)
+        .then(
+          () => {},
+          () => {}
+        );
+    }
+  } catch {}
+
+  notifyChange();
+  return memoryPharmacies[idx];
 }
 
 export function updatePharmacySuperAdmin(
   pharmacieId: string,
   updates: Partial<Pharmacie>
 ): Pharmacie | null {
-  const list = loadPharmacies();
-  const idx = list.findIndex(p => p.id === pharmacieId);
+  const idx = memoryPharmacies.findIndex((p) => p.id === pharmacieId);
   if (idx === -1) return null;
-  list[idx] = { ...list[idx], ...updates };
-  savePharmacies(list);
-  return list[idx];
+  memoryPharmacies[idx] = { ...memoryPharmacies[idx], ...updates };
+
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      sb.from('pharmacies')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', pharmacieId)
+        .then(
+          () => {},
+          () => {}
+        );
+    }
+  } catch {}
+
+  notifyChange();
+  return memoryPharmacies[idx];
 }
 
 export interface SubscriptionActivationOptions {
@@ -271,10 +695,6 @@ export interface SubscriptionActivationOptions {
   durationDays?: number;
 }
 
-/**
- * Active l'abonnement en Base de Données Supabase (Source unique de vérité)
- * Puis synchronise le cache local et notifie tous les écouteurs en temps réel.
- */
 export async function activateSubscriptionInDB(
   pharmacyId: string,
   options: SubscriptionActivationOptions
@@ -282,7 +702,8 @@ export async function activateSubscriptionInDB(
   const { planType } = options;
   const now = new Date();
   const isPremium = planType === 'premium_140k' || planType === 'premium_15k';
-  const durationDays = options.durationDays || (planType === 'premium_15k' ? 30 : 365);
+  const durationDays =
+    options.durationDays || (planType === 'premium_15k' ? 30 : 365);
   const end = new Date(now.getTime() + durationDays * 86400000);
 
   const updates: Partial<Pharmacie> = {
@@ -298,24 +719,30 @@ export async function activateSubscriptionInDB(
     position: isPremium ? 0 : 1,
     is_always_visible: isPremium,
     badge: isPremium ? 'POPULAIRE' : undefined,
-    plan: planType === 'premium_140k' ? 'populaire_annuel' : planType === 'premium_15k' ? 'populaire_mensuel' : 'annual',
-    prix: planType === 'premium_140k' ? 140000 : planType === 'premium_15k' ? 15000 : 90000,
+    plan:
+      planType === 'premium_140k'
+        ? 'populaire_annuel'
+        : planType === 'premium_15k'
+        ? 'populaire_mensuel'
+        : 'annual',
+    prix:
+      planType === 'premium_140k'
+        ? 140000
+        : planType === 'premium_15k'
+        ? 15000
+        : 90000,
     statut: 'approved',
   };
 
   try {
     const client = getSupabaseClient();
     if (client) {
-      const { error } = await client
+      await client
         .from('pharmacies')
         .update(updates)
         .eq('id', pharmacyId);
-      if (error) {
-        console.warn('[EFA GARDE] Error updating pharmacy subscription in DB:', error);
-      }
 
-      // Synchronisation table abonnements (renouveler au lieu de créer un doublon)
-      const currentPharma = loadPharmacies().find((p) => p.id === pharmacyId);
+      const currentPharma = memoryPharmacies.find((p) => p.id === pharmacyId);
       const pharmaNom = updates.nom || currentPharma?.nom || 'Pharmacie';
       await client
         .from('abonnements')
@@ -335,9 +762,12 @@ export async function activateSubscriptionInDB(
           },
           { onConflict: 'entreprise_id' }
         )
-        .then(() => {}, (err) => {
-          console.warn('[EFA GARDE] Upsert abonnements error:', err);
-        });
+        .then(
+          () => {},
+          (err) => {
+            console.warn('[EFA GARDE] Upsert abonnements error:', err);
+          }
+        );
     }
   } catch (err) {
     console.warn('[EFA GARDE] Failed to update DB:', err);
@@ -348,34 +778,94 @@ export async function activateSubscriptionInDB(
   return updated;
 }
 
+export async function fetchPharmacyById(id: string): Promise<Pharmacie | null> {
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data, error } = await client
+        .from('pharmacies')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (!error && data) {
+        updatePharmacySuperAdmin(id, data as Pharmacie);
+        return data as Pharmacie;
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchPharmacyById fallback:', err);
+  }
+  return memoryPharmacies.find((p) => p.id === id) || null;
+}
+
+export async function approvePendingPharmacy(
+  pendingId: string
+): Promise<Pharmacie | null> {
+  await approvePharmacySuperAdmin(pendingId);
+  return memoryPharmacies.find((p) => p.id === pendingId) || null;
+}
+
+export async function rejectPendingPharmacy(pendingId: string): Promise<boolean> {
+  return rejectPharmacySuperAdmin(pendingId);
+}
+
+export async function registerNewPharmacy(data: {
+  nom: string;
+  adresse: string;
+  lat: number;
+  lng: number;
+  tel: string;
+  is_online: boolean;
+  horaires?: string;
+  quartier?: string;
+  titulaire?: string;
+}): Promise<Pharmacie> {
+  const pending = await addPendingPharmacy({
+    nom: data.nom,
+    adresse: data.adresse,
+    quartier: data.quartier || 'Lomé',
+    phone: data.tel,
+    titulaire: data.titulaire || 'Titulaire Officine',
+    lat: data.lat,
+    lng: data.lng,
+  });
+  const found = memoryPharmacies.find((p) => p.id === pending.id);
+  return (
+    found || {
+      id: pending.id,
+      nom: data.nom,
+      adresse: data.adresse,
+      lat: data.lat,
+      lng: data.lng,
+      tel: data.tel,
+      plan: 'free',
+      is_online: data.is_online,
+      statut: 'pending',
+      is_pending: true,
+      is_active: false,
+    }
+  );
+}
+
 /* =========================================================
-   SYNCHRONISATION DES 6 TABLES SUPABASE
-   abonnements, conversations, messages, pharmacies, utilisateurs, clients
+   CLIENTS : TABLE `public.clients`
+   - Inscription client -> INSERT INTO public.clients (nom, numero)
+   - Super Admin Clients Inscrits -> SELECT COUNT(*) FROM public.clients en Realtime
+   - Session locale autorisée : nom, numero, client_id
    ========================================================= */
 
-const LOCAL_STORAGE_CLIENTS = 'efa_clients_v1';
-
 export function loadClients(): Client[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_CLIENTS);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-  return [];
+  return memoryClients;
 }
 
 export function saveClients(clients: Client[]): void {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_CLIENTS, JSON.stringify(clients));
-    notifyChange();
-  } catch {}
+  memoryClients = clients;
+  notifyChange();
 }
 
 /**
- * Enregistrement direct d'un client dans la table Supabase `clients` et localement.
- * Idéal pour les statistiques de fréquentation globale de l'app.
+ * INSCRIPTION CLIENT :
+ * INSERT INTO public.clients (nom, numero, numero_whatsapp)
  */
 export async function registerClientInDB(data: {
   nom: string;
@@ -395,32 +885,31 @@ export async function registerClientInDB(data: {
     date_inscription: now,
   };
 
-  // Cache local
+  // Session persistante client strictement (nom + numero)
   localStorage.setItem('efa_client_id', clientId);
   localStorage.setItem('efa_client_nom', cleanNom);
   localStorage.setItem('efa_client_whatsapp', cleanPhone);
 
-  const list = loadClients().filter((c) => c.numero_whatsapp !== cleanPhone && c.id !== clientId);
-  list.unshift(clientObj);
-  saveClients(list);
+  memoryClients = memoryClients.filter(
+    (c) => c.numero_whatsapp !== cleanPhone && c.id !== clientId
+  );
+  memoryClients.unshift(clientObj);
+  memoryClientsCount += 1;
 
-  // Synchronisation Supabase table clients
+  // Enregistrement direct dans Supabase table clients
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      await sb
-        .from('clients')
-        .upsert({
-          id: clientObj.id,
-          nom: clientObj.nom,
-          numero: clientObj.numero_whatsapp,
-          numero_whatsapp: clientObj.numero_whatsapp,
-          date_inscription: clientObj.date_inscription,
-          created_at: clientObj.date_inscription,
-        })
-        .then(() => {}, () => {});
+      await sb.from('clients').upsert({
+        id: clientObj.id,
+        nom: clientObj.nom,
+        numero: clientObj.numero_whatsapp,
+        numero_whatsapp: clientObj.numero_whatsapp,
+        date_inscription: clientObj.date_inscription,
+        created_at: clientObj.date_inscription,
+        updated_at: clientObj.date_inscription,
+      });
 
-      // Synchronisation table utilisateurs
       await sb
         .from('utilisateurs')
         .upsert({
@@ -428,10 +917,13 @@ export async function registerClientInDB(data: {
           role: 'client',
           telephone: clientObj.numero_whatsapp,
         })
-        .then(() => {}, () => {});
+        .then(
+          () => {},
+          () => {}
+        );
     }
   } catch (err) {
-    console.warn('registerClientInDB fallback:', err);
+    console.warn('[EFA] registerClientInDB Supabase warning:', err);
   }
 
   notifyChange();
@@ -439,7 +931,7 @@ export async function registerClientInDB(data: {
 }
 
 /**
- * Récupère le nombre total de clients enregistrés depuis Supabase
+ * SUPER ADMIN : SELECT COUNT(*) FROM public.clients en Realtime
  */
 export async function fetchClientsCount(): Promise<number> {
   try {
@@ -449,36 +941,37 @@ export async function fetchClientsCount(): Promise<number> {
         .from('clients')
         .select('*', { count: 'exact', head: true });
       if (!error && typeof count === 'number') {
+        memoryClientsCount = count;
         return count;
       }
     }
   } catch {}
-  return loadClients().length;
+  return memoryClientsCount || memoryClients.length;
+}
+
+export function getOrCreateClientId(): string {
+  if (typeof window === 'undefined') return 'client-guest-1';
+  let cid = localStorage.getItem('efa_client_id');
+  if (!cid) {
+    cid = 'client-' + Math.random().toString(36).substring(2, 9);
+    localStorage.setItem('efa_client_id', cid);
+  }
+  return cid;
 }
 
 /* =========================================================
-   GESTION DES DEMANDES D'ABONNEMENT & PAIEMENT 25.000 FCFA
-   (Code 4 chiffres généré par le Super Admin & validé en DB)
+   ABONNEMENTS : TABLE `public.abonnements`
+   - Inscription pharmacie / Paiement WhatsApp -> INSERT INTO public.abonnements
+   - Générer code 4 chiffres -> UPDATE public.abonnements SET code_validation
    ========================================================= */
 
-const LOCAL_STORAGE_DEMANDES_ABONNEMENT = 'efa_demandes_abonnement_v1';
-
 export function loadDemandesAbonnement(): DemandeAbonnement[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_DEMANDES_ABONNEMENT);
-    if (raw) {
-      const list = JSON.parse(raw);
-      if (Array.isArray(list)) return list;
-    }
-  } catch {}
-  return [];
+  return memoryDemandesAbonnement;
 }
 
 export function saveDemandesAbonnement(list: DemandeAbonnement[]): void {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_DEMANDES_ABONNEMENT, JSON.stringify(list));
-    notifyChange();
-  } catch {}
+  memoryDemandesAbonnement = list;
+  notifyChange();
 }
 
 export async function fetchDemandesAbonnement(): Promise<DemandeAbonnement[]> {
@@ -489,6 +982,7 @@ export async function fetchDemandesAbonnement(): Promise<DemandeAbonnement[]> {
         .from('abonnements')
         .select('*')
         .order('created_at', { ascending: false });
+
       if (!error && data && Array.isArray(data)) {
         const mapped: DemandeAbonnement[] = data.map((d: any) => ({
           id: d.id,
@@ -497,25 +991,29 @@ export async function fetchDemandesAbonnement(): Promise<DemandeAbonnement[]> {
           email: d.email,
           montant: Number(d.montant) || 25000,
           plan: d.plan || 'enregistrement_25k',
-          statut: d.statut === 'paye_valide' || d.statut === 'active' ? 'paye_valide' : (d.statut || 'en_attente'),
+          statut:
+            d.statut === 'paye_valide' || d.statut === 'active'
+              ? 'paye_valide'
+              : d.statut || 'en_attente',
           code_validation: d.code_validation,
           created_at: d.created_at || new Date().toISOString(),
           validated_at: d.validated_at,
           pharmacie_id: d.pharmacie_id,
         }));
-        saveDemandesAbonnement(mapped);
+        memoryDemandesAbonnement = mapped;
+        notifyChange();
         return mapped;
       }
     }
   } catch (err) {
     console.warn('[EFA] fetchDemandesAbonnement warning:', err);
   }
-  return loadDemandesAbonnement();
+  return memoryDemandesAbonnement;
 }
 
 /**
- * Crée automatiquement une demande dans Supabase > abonnements (25.000 FCFA)
- * Déclenchée au clic "Payer 25.000F via WhatsApp"
+ * INSCRIPTION PHARMACIE / PAIEMENT WHATSAPP :
+ * INSERT INTO public.abonnements (montant=25000, statut='en_attente')
  */
 export async function createSubscriptionPaymentRequest(data: {
   nom_pharmacie: string;
@@ -526,7 +1024,8 @@ export async function createSubscriptionPaymentRequest(data: {
   const cleanNom = data.nom_pharmacie.trim();
   const cleanPhone = data.telephone.trim().replace(/\s+/g, '');
   const now = new Date().toISOString();
-const id = crypto.randomUUID();
+  const id = crypto.randomUUID();
+
   const demande: DemandeAbonnement = {
     id,
     nom_pharmacie: cleanNom,
@@ -538,15 +1037,17 @@ const id = crypto.randomUUID();
     created_at: now,
   };
 
-  const list = loadDemandesAbonnement().filter((d) => d.telephone !== cleanPhone && d.id !== id);
-  list.unshift(demande);
-  saveDemandesAbonnement(list);
+  memoryDemandesAbonnement = memoryDemandesAbonnement.filter(
+    (d) => d.telephone !== cleanPhone && d.id !== id
+  );
+  memoryDemandesAbonnement.unshift(demande);
 
   // Synchronisation Supabase table abonnements
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      const entrepriseId = 'pending-' + cleanNom.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      const entrepriseId =
+        'sub-' + cleanNom.toLowerCase().replace(/[^a-z0-9]/g, '-');
       await sb.from('abonnements').upsert(
         {
           id: demande.id,
@@ -566,7 +1067,10 @@ const id = crypto.randomUUID();
       );
     }
   } catch (err) {
-    console.warn('[EFA] createSubscriptionPaymentRequest supabase warning:', err);
+    console.warn(
+      '[EFA] createSubscriptionPaymentRequest Supabase warning:',
+      err
+    );
   }
 
   notifyChange();
@@ -574,37 +1078,28 @@ const id = crypto.randomUUID();
 }
 
 /**
- * Super Admin valide le paiement et génère un code secret à 4 chiffres
+ * GÉNÉRER CODE 4 CHIFFRES (Super Admin) :
+ * UPDATE public.abonnements SET code_validation, statut='paye_valide'
  */
 export async function validateSubscriptionPaymentAndGenerateCode(
   demandeId: string,
   customCode?: string
 ): Promise<{ code: string; demande: DemandeAbonnement | null }> {
-  // Générer code à 4 chiffres sécurisé (1000 - 9999)
   const code = customCode || Math.floor(1000 + Math.random() * 9000).toString();
   const now = new Date().toISOString();
 
-  const list = loadDemandesAbonnement();
-  const found = list.find((d) => d.id === demandeId);
+  const found = memoryDemandesAbonnement.find((d) => d.id === demandeId);
   if (found) {
     found.statut = 'paye_valide';
     found.code_validation = code;
     found.validated_at = now;
-    saveDemandesAbonnement(list);
   }
-
-  // Stocker dans la table des codes validés pour vérification ultra-rapide
-  try {
-    const codesRaw = localStorage.getItem('efa_validated_codes_v1');
-    const codesMap: Record<string, any> = codesRaw ? JSON.parse(codesRaw) : {};
-    codesMap[code] = {
-      demandeId,
-      nom_pharmacie: found?.nom_pharmacie,
-      telephone: found?.telephone,
-      validated_at: now,
-    };
-    localStorage.setItem('efa_validated_codes_v1', JSON.stringify(codesMap));
-  } catch {}
+  memoryValidatedCodes[code] = {
+    demandeId,
+    nom_pharmacie: found?.nom_pharmacie,
+    telephone: found?.telephone,
+    validated_at: now,
+  };
 
   // Synchronisation Supabase table abonnements
   try {
@@ -620,7 +1115,10 @@ export async function validateSubscriptionPaymentAndGenerateCode(
         .eq('id', demandeId);
     }
   } catch (err) {
-    console.warn('[EFA] validateSubscriptionPaymentAndGenerateCode supabase warning:', err);
+    console.warn(
+      '[EFA] validateSubscriptionPaymentAndGenerateCode Supabase warning:',
+      err
+    );
   }
 
   notifyChange();
@@ -628,16 +1126,19 @@ export async function validateSubscriptionPaymentAndGenerateCode(
 }
 
 /**
- * Vérification du code 4 chiffres saisi par le pharmacien sur la page de paiement
- * Code faux = bloqué | Code bon = débloque suite
+ * VÉRIFICATION CODE 4 CHIFFRES :
+ * SELECT * FROM public.abonnements WHERE code_validation = $code
  */
 export async function verifyRegistrationCode(
   code: string,
-  telephone?: string
+  _telephone?: string
 ): Promise<{ valid: boolean; demande?: DemandeAbonnement; error?: string }> {
   const cleanCode = code.trim();
   if (!cleanCode || cleanCode.length !== 4) {
-    return { valid: false, error: 'Veuillez saisir un code à 4 chiffres valide.' };
+    return {
+      valid: false,
+      error: 'Veuillez saisir un code à 4 chiffres valide.',
+    };
   }
 
   // 1. Vérification Supabase en direct
@@ -668,50 +1169,45 @@ export async function verifyRegistrationCode(
       }
     }
   } catch (err) {
-    console.warn('[EFA] verifyRegistrationCode supabase warning:', err);
+    console.warn('[EFA] verifyRegistrationCode Supabase warning:', err);
   }
 
-  // 2. Vérification cache local
-  const list = loadDemandesAbonnement();
-  const localMatch = list.find(
-    (d) => d.code_validation === cleanCode && (d.statut === 'paye_valide' || d.statut === 'en_attente')
+  // 2. Vérification mémoire runtime
+  const localMatch = memoryDemandesAbonnement.find(
+    (d) =>
+      d.code_validation === cleanCode &&
+      (d.statut === 'paye_valide' || d.statut === 'en_attente')
   );
   if (localMatch) {
     return { valid: true, demande: localMatch };
   }
 
-  // 3. Vérification map des codes validés
-  try {
-    const codesRaw = localStorage.getItem('efa_validated_codes_v1');
-    if (codesRaw) {
-      const codesMap = JSON.parse(codesRaw);
-      if (codesMap[cleanCode]) {
-        return {
-          valid: true,
-          demande: {
-            id: codesMap[cleanCode].demandeId || 'code-' + cleanCode,
-            nom_pharmacie: codesMap[cleanCode].nom_pharmacie || 'Pharmacie',
-            telephone: codesMap[cleanCode].telephone || '',
-            montant: 25000,
-            statut: 'paye_valide',
-            code_validation: cleanCode,
-            created_at: new Date().toISOString(),
-          },
-        };
-      }
-    }
-  } catch {}
+  if (memoryValidatedCodes[cleanCode]) {
+    const info = memoryValidatedCodes[cleanCode];
+    return {
+      valid: true,
+      demande: {
+        id: info.demandeId || 'code-' + cleanCode,
+        nom_pharmacie: info.nom_pharmacie || 'Pharmacie',
+        telephone: info.telephone || '',
+        montant: 25000,
+        statut: 'paye_valide',
+        code_validation: cleanCode,
+        created_at: new Date().toISOString(),
+      },
+    };
+  }
 
   return {
     valid: false,
-    error: 'Code à 4 chiffres invalide ou paiement non encore validé par l\'administrateur.',
+    error:
+      "Code à 4 chiffres invalide ou paiement non encore validé par l'administrateur.",
   };
 }
 
-/**
- * Récupère les abonnements récents depuis la table Supabase `abonnements`
- */
-export async function fetchAbonnements(pharmacieId?: string): Promise<Abonnement[]> {
+export async function fetchAbonnements(
+  pharmacieId?: string
+): Promise<Abonnement[]> {
   try {
     const sb = getSupabaseClient();
     if (sb) {
@@ -735,9 +1231,59 @@ export async function fetchAbonnements(pharmacieId?: string): Promise<Abonnement
   return [];
 }
 
-/**
- * Synchronise les conversations depuis Supabase
- */
+/* =========================================================
+   MESSAGERIE & CHAT : TABLES `public.conversations` & `public.messages`
+   - INSERT / SELECT sur conversations + messages + Realtime channel
+   - Pas de reload, zéro localStorage pour le contenu des messages
+   ========================================================= */
+
+export const MS_24_HOURS = 24 * 60 * 60 * 1000;
+
+export function isMessageExpired(m: Message): boolean {
+  const now = Date.now();
+  if (m.expires_at) {
+    return new Date(m.expires_at).getTime() <= now;
+  }
+  const created = new Date(m.created_at).getTime();
+  return now - created >= MS_24_HOURS;
+}
+
+export function saveConversations(convs: Conversation[]) {
+  memoryConversations = convs;
+  notifyChange();
+}
+
+export function loadConversations(
+  pharmacieId?: string,
+  clientId?: string,
+  pharmacyUserId?: string
+): Conversation[] {
+  let all = [...memoryConversations].map((c) => ({
+    ...c,
+    pharmacy_id: c.pharmacy_id || (c as any).pharmacie_id || '',
+  }));
+
+  all.sort((a, b) => {
+    const timeA = new Date(a.last_message_at || a.updated_at || 0).getTime();
+    const timeB = new Date(b.last_message_at || b.updated_at || 0).getTime();
+    return timeB - timeA;
+  });
+
+  if (pharmacyUserId && pharmacieId) {
+    return all.filter(
+      (c) =>
+        c.pharmacy_user_id === pharmacyUserId || c.pharmacy_id === pharmacieId
+    );
+  }
+  if (pharmacieId) {
+    return all.filter((c) => c.pharmacy_id === pharmacieId);
+  }
+  if (clientId) {
+    return all.filter((c) => c.client_id === clientId);
+  }
+  return all;
+}
+
 export async function fetchConversations(
   pharmacieId?: string,
   clientId?: string
@@ -759,9 +1305,9 @@ export async function fetchConversations(
 
       const { data, error } = await query;
       if (!error && Array.isArray(data)) {
-        const convs = data as Conversation[];
-        saveConversations(convs);
-        return convs;
+        memoryConversations = data as Conversation[];
+        notifyChange();
+        return memoryConversations;
       }
     }
   } catch (err) {
@@ -770,164 +1316,12 @@ export async function fetchConversations(
   return loadConversations(pharmacieId, clientId);
 }
 
-/**
- * Synchronise les messages d'une conversation depuis Supabase
- */
-export async function fetchMessages(conversationId: string): Promise<Message[]> {
-  try {
-    const sb = getSupabaseClient();
-    if (sb) {
-      const { data, error } = await sb
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-
-      if (!error && Array.isArray(data)) {
-        const msgs = (data as Message[]).filter((m) => !isMessageExpired(m));
-        const raw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
-        const all: Record<string, Message[]> = raw ? JSON.parse(raw) : {};
-        all[conversationId] = msgs;
-        localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
-        notifyChange();
-        return msgs;
-      }
-    }
-  } catch (err) {
-    console.warn('fetchMessages error:', err);
-  }
-  return loadMessages(conversationId);
-}
-
-export async function fetchPharmacyById(id: string): Promise<Pharmacie | null> {
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      const { data, error } = await client
-        .from('pharmacies')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (!error && data) {
-        updatePharmacySuperAdmin(id, data as Pharmacie);
-        return data as Pharmacie;
-      }
-    }
-  } catch (err) {
-    console.warn('[EFA GARDE] fetchPharmacyById fallback:', err);
-  }
-  const list = loadPharmacies();
-  return list.find((p) => p.id === id) || null;
-}
-
-export function loadGardes(pharmacieId?: string): Garde[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_GARDES);
-    const all: Garde[] = raw ? JSON.parse(raw) : [];
-    if (pharmacieId) {
-      return all.filter(g => g.pharmacie_id === pharmacieId);
-    }
-    return all;
-  } catch {
-    return [];
-  }
-}
-
-export function addGarde(garde: Omit<Garde, 'id'>): Garde {
-  const all = loadGardes();
-  const newGarde: Garde = {
-    ...garde,
-    id: 'garde-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)
-  };
-  all.push(newGarde);
-  localStorage.setItem(LOCAL_STORAGE_GARDES, JSON.stringify(all));
-  notifyChange();
-  return newGarde;
-}
-
-export function deleteGarde(id: string) {
-  const all = loadGardes();
-  const filtered = all.filter(g => g.id !== id);
-  localStorage.setItem(LOCAL_STORAGE_GARDES, JSON.stringify(filtered));
-  notifyChange();
-}
-
-export function isPharmacyCurrentlyOnDuty(pharmacieId: string): boolean {
-  const gardes = loadGardes(pharmacieId);
-  const now = new Date().getTime();
-  return gardes.some(g => {
-    const start = new Date(g.date_debut).getTime();
-    const end = new Date(g.date_fin).getTime();
-    return now >= start && now <= end;
-  });
-}
-
-export function getOrCreateClientId(): string {
-  if (typeof window === 'undefined') return 'client-guest-1';
-  let cid = localStorage.getItem('efa_client_id');
-  if (!cid) {
-    cid = 'client-' + Math.random().toString(36).substring(2, 9);
-    localStorage.setItem('efa_client_id', cid);
-  }
-  return cid;
-}
-
-export function saveConversations(convs: Conversation[]) {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_CONVERSATIONS, JSON.stringify(convs));
-  } catch {
-    // ignore
-  }
-}
-
-export function loadConversations(
-  pharmacieId?: string,
-  clientId?: string,
-  pharmacyUserId?: string
-): Conversation[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_CONVERSATIONS);
-    let all: Conversation[] = raw ? JSON.parse(raw) : [];
-
-    // Normalisation pharmacy_id
-    all = all.map((c) => ({
-      ...c,
-      pharmacy_id: c.pharmacy_id || (c as any).pharmacie_id || '',
-    }));
-
-    // Tri par last_message_at décroissant
-    all.sort((a, b) => {
-      const timeA = new Date(a.last_message_at || a.updated_at || 0).getTime();
-      const timeB = new Date(b.last_message_at || b.updated_at || 0).getTime();
-      return timeB - timeA;
-    });
-
-    if (pharmacyUserId && pharmacieId) {
-      return all.filter(
-        (c) =>
-          c.pharmacy_user_id === pharmacyUserId ||
-          c.pharmacy_id === pharmacieId
-      );
-    }
-    if (pharmacieId) {
-      return all.filter((c) => c.pharmacy_id === pharmacieId);
-    }
-    if (clientId) {
-      return all.filter((c) => c.client_id === clientId);
-    }
-    return all;
-  } catch {
-    return [];
-  }
-}
-
 export function getOrCreateConversation(
   clientId: string,
   pharmacieId: string,
   pharmacyUserId?: string
 ): Conversation {
-  const all = loadConversations();
-  const existing = all.find(
+  const existing = memoryConversations.find(
     (c) =>
       c.client_id === clientId &&
       (c.pharmacy_id === pharmacieId || (c as any).pharmacie_id === pharmacieId)
@@ -936,7 +1330,7 @@ export function getOrCreateConversation(
   if (existing) {
     if (pharmacyUserId && !existing.pharmacy_user_id) {
       existing.pharmacy_user_id = pharmacyUserId;
-      saveConversations(all);
+      notifyChange();
     }
     return existing;
   }
@@ -957,8 +1351,7 @@ export function getOrCreateConversation(
     updated_at: now,
   };
 
-  all.unshift(newConv);
-  saveConversations(all);
+  memoryConversations.unshift(newConv);
 
   // Sync Supabase conversations
   try {
@@ -979,7 +1372,10 @@ export function getOrCreateConversation(
           created_at: now,
           updated_at: now,
         })
-        .then(() => {}, () => {});
+        .then(
+          () => {},
+          () => {}
+        );
     }
   } catch {}
 
@@ -987,26 +1383,34 @@ export function getOrCreateConversation(
   return newConv;
 }
 
-export const MS_24_HOURS = 24 * 60 * 60 * 1000;
-
-export function isMessageExpired(m: Message): boolean {
-  const now = Date.now();
-  if (m.expires_at) {
-    return new Date(m.expires_at).getTime() <= now;
-  }
-  const created = new Date(m.created_at).getTime();
-  return now - created >= MS_24_HOURS;
+export function loadMessages(conversationId: string): Message[] {
+  const list = memoryMessages[conversationId] || [];
+  return list.filter((m) => !isMessageExpired(m));
 }
 
-export function loadMessages(conversationId: string): Message[] {
+export async function fetchMessages(
+  conversationId: string
+): Promise<Message[]> {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
-    const all: Record<string, Message[]> = raw ? JSON.parse(raw) : {};
-    const list = all[conversationId] || [];
-    return list.filter((m) => !isMessageExpired(m));
-  } catch {
-    return [];
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { data, error } = await sb
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      if (!error && Array.isArray(data)) {
+        const msgs = (data as Message[]).filter((m) => !isMessageExpired(m));
+        memoryMessages[conversationId] = msgs;
+        notifyChange();
+        return msgs;
+      }
+    }
+  } catch (err) {
+    console.warn('fetchMessages error:', err);
   }
+  return loadMessages(conversationId);
 }
 
 export function addMessage(
@@ -1022,9 +1426,8 @@ export function addMessage(
     senderType?: 'client' | 'pharma' | 'system';
   }
 ): Message {
-  const convs = loadConversations();
-  const cIdx = convs.findIndex((c) => c.id === conversationId);
-  const conv = cIdx !== -1 ? convs[cIdx] : null;
+  const cIdx = memoryConversations.findIndex((c) => c.id === conversationId);
+  const conv = cIdx !== -1 ? memoryConversations[cIdx] : null;
 
   // 1. Vérification Anti-Harcèlement / Blocage
   if (conv && conv.is_blocked) {
@@ -1036,9 +1439,9 @@ export function addMessage(
     }
   }
 
-  const raw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
-  const all: Record<string, Message[]> = raw ? JSON.parse(raw) : {};
-  const list = (all[conversationId] || []).filter((m) => !isMessageExpired(m));
+  const list = (memoryMessages[conversationId] || []).filter(
+    (m) => !isMessageExpired(m)
+  );
 
   const createdAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + MS_24_HOURS).toISOString();
@@ -1073,10 +1476,9 @@ export function addMessage(
   };
 
   list.push(newMsg);
-  all[conversationId] = list;
-  localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
+  memoryMessages[conversationId] = list;
 
-  // 2. Mettre à jour last_message, last_message_at et incrémenter l'inbox non lue
+  // 2. Mettre à jour last_message, last_message_at et incrémenter unread count
   if (cIdx !== -1) {
     const summary =
       mediaOptions?.type === 'audio'
@@ -1085,27 +1487,25 @@ export function addMessage(
         ? '📷 Photo'
         : text;
 
-    convs[cIdx].last_message = summary;
-    convs[cIdx].last_message_at = createdAt;
-    convs[cIdx].updated_at = createdAt;
+    memoryConversations[cIdx].last_message = summary;
+    memoryConversations[cIdx].last_message_at = createdAt;
+    memoryConversations[cIdx].updated_at = createdAt;
 
     if (sender === 'client') {
-      convs[cIdx].unread_count_pharmacy =
-        (convs[cIdx].unread_count_pharmacy || 0) + 1;
-      if (convs[cIdx].pharmacy_id) {
+      memoryConversations[cIdx].unread_count_pharmacy =
+        (memoryConversations[cIdx].unread_count_pharmacy || 0) + 1;
+      if (memoryConversations[cIdx].pharmacy_id) {
         try {
-          recordClientContact(convs[cIdx].pharmacy_id);
+          recordClientContact(memoryConversations[cIdx].pharmacy_id);
         } catch {}
       }
     } else {
-      convs[cIdx].unread_count_client =
-        (convs[cIdx].unread_count_client || 0) + 1;
+      memoryConversations[cIdx].unread_count_client =
+        (memoryConversations[cIdx].unread_count_client || 0) + 1;
     }
-
-    saveConversations(convs);
   }
 
-  // 3. Diffuser sur BroadcastChannel pour son & vibreur instantanés cross-onglets
+  // 3. Diffuser sur BroadcastChannel pour son & vibreur instantanés
   if (realtimeBus) {
     try {
       realtimeBus.postMessage({
@@ -1119,7 +1519,7 @@ export function addMessage(
     } catch {}
   }
 
-  // 4. Synchronisation Supabase table messages
+  // 4. Synchronisation Supabase table messages + conversations
   try {
     const sb = getSupabaseClient();
     if (sb) {
@@ -1140,7 +1540,10 @@ export function addMessage(
           created_at: newMsg.created_at,
           expires_at: newMsg.expires_at,
         })
-        .then(() => {}, () => {});
+        .then(
+          () => {},
+          () => {}
+        );
 
       if (conv) {
         sb.from('conversations')
@@ -1152,7 +1555,10 @@ export function addMessage(
             updated_at: conv.updated_at,
           })
           .eq('id', conversationId)
-          .then(() => {}, () => {});
+          .then(
+            () => {},
+            () => {}
+          );
       }
     }
   } catch {}
@@ -1166,42 +1572,29 @@ export function markConversationAsRead(
   readerType: 'pharma' | 'client',
   readerId?: string
 ) {
-  const convs = loadConversations();
-  const cIdx = convs.findIndex((c) => c.id === conversationId);
+  const cIdx = memoryConversations.findIndex((c) => c.id === conversationId);
   if (cIdx !== -1) {
     if (readerType === 'pharma') {
-      convs[cIdx].unread_count_pharmacy = 0;
+      memoryConversations[cIdx].unread_count_pharmacy = 0;
     } else {
-      convs[cIdx].unread_count_client = 0;
+      memoryConversations[cIdx].unread_count_client = 0;
     }
-    saveConversations(convs);
   }
 
-  const raw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
-  if (raw) {
-    const all: Record<string, Message[]> = JSON.parse(raw);
-    const msgs = all[conversationId] || [];
-    let modified = false;
-    for (const m of msgs) {
-      if (!m.is_read) {
-        if (
-          readerType === 'pharma' &&
-          (m.sender === 'client' || m.receiver_id === readerId)
-        ) {
-          m.is_read = true;
-          modified = true;
-        } else if (
-          readerType === 'client' &&
-          (m.sender === 'pharma' || m.receiver_id === readerId)
-        ) {
-          m.is_read = true;
-          modified = true;
-        }
+  const msgs = memoryMessages[conversationId] || [];
+  for (const m of msgs) {
+    if (!m.is_read) {
+      if (
+        readerType === 'pharma' &&
+        (m.sender === 'client' || m.receiver_id === readerId)
+      ) {
+        m.is_read = true;
+      } else if (
+        readerType === 'client' &&
+        (m.sender === 'pharma' || m.receiver_id === readerId)
+      ) {
+        m.is_read = true;
       }
-    }
-    if (modified) {
-      all[conversationId] = msgs;
-      localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
     }
   }
 
@@ -1215,14 +1608,20 @@ export function markConversationAsRead(
       sb.from('conversations')
         .update(updateData)
         .eq('id', conversationId)
-        .then(() => {}, () => {});
+        .then(
+          () => {},
+          () => {}
+        );
 
       if (readerId) {
         sb.from('messages')
           .update({ is_read: true })
           .eq('conversation_id', conversationId)
           .eq('receiver_id', readerId)
-          .then(() => {}, () => {});
+          .then(
+            () => {},
+            () => {}
+          );
       }
     }
   } catch {}
@@ -1237,29 +1636,28 @@ export function blockConversation(
   isReported: boolean,
   reportDetails?: { reason: string; description?: string }
 ): Conversation | null {
-  const convs = loadConversations();
-  const cIdx = convs.findIndex((c) => c.id === conversationId);
+  const cIdx = memoryConversations.findIndex((c) => c.id === conversationId);
   if (cIdx === -1) return null;
 
   const now = new Date().toISOString();
-  convs[cIdx].is_blocked = true;
-  convs[cIdx].blocked_by = blockerId;
-  convs[cIdx].blocked_by_type = blockerType;
-  convs[cIdx].blocked_at = now;
-  convs[cIdx].is_reported = Boolean(isReported);
-  convs[cIdx].updated_at = now;
-
-  saveConversations(convs);
+  memoryConversations[cIdx].is_blocked = true;
+  memoryConversations[cIdx].blocked_by = blockerId;
+  memoryConversations[cIdx].blocked_by_type = blockerType;
+  memoryConversations[cIdx].blocked_at = now;
+  memoryConversations[cIdx].is_reported = Boolean(isReported);
+  memoryConversations[cIdx].updated_at = now;
 
   if (isReported && reportDetails) {
     const sigId =
       'sig-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
     const reportedId =
       blockerType === 'pharmacy'
-        ? convs[cIdx].client_id
-        : convs[cIdx].pharmacy_id;
+        ? memoryConversations[cIdx].client_id
+        : memoryConversations[cIdx].pharmacy_id;
 
-    const ph = loadPharmacies().find((p) => p.id === convs[cIdx].pharmacy_id);
+    const ph = memoryPharmacies.find(
+      (p) => p.id === memoryConversations[cIdx].pharmacy_id
+    );
 
     const newSignalement: Signalement = {
       id: sigId,
@@ -1271,42 +1669,20 @@ export function blockConversation(
       status: 'pending',
       created_at: now,
       pharmacy_nom: ph?.nom || 'Pharmacie',
-      client_nom: convs[cIdx].client_id,
+      client_nom: memoryConversations[cIdx].client_id,
     };
 
-    const rawS = localStorage.getItem(LOCAL_STORAGE_SIGNALEMENTS);
-    const signalements: Signalement[] = rawS ? JSON.parse(rawS) : [];
-    signalements.unshift(newSignalement);
-    localStorage.setItem(
-      LOCAL_STORAGE_SIGNALEMENTS,
-      JSON.stringify(signalements)
-    );
-
-    const rawN = localStorage.getItem(LOCAL_STORAGE_NOTIFICATIONS_ADMIN);
-    const notifs = rawN ? JSON.parse(rawN) : [];
-    notifs.unshift({
-      id: 'notif-' + Date.now(),
-      type: 'report_block',
-      details: {
-        signalement_id: sigId,
-        conversation_id: conversationId,
-        reason: reportDetails.reason,
-        reporter_type: blockerType,
-      },
-      created_at: now,
-      is_read: false,
-    });
-    localStorage.setItem(
-      LOCAL_STORAGE_NOTIFICATIONS_ADMIN,
-      JSON.stringify(notifs)
-    );
+    memorySignalements.unshift(newSignalement);
 
     try {
       const sb = getSupabaseClient();
       if (sb) {
         sb.from('signalements')
           .insert(newSignalement)
-          .then(() => {}, () => {});
+          .then(
+            () => {},
+            () => {}
+          );
         sb.from('notifications_admin')
           .insert({
             type: 'report_block',
@@ -1317,7 +1693,10 @@ export function blockConversation(
             },
             is_read: false,
           })
-          .then(() => {}, () => {});
+          .then(
+            () => {},
+            () => {}
+          );
       }
     } catch {}
   }
@@ -1335,7 +1714,10 @@ export function blockConversation(
           updated_at: now,
         })
         .eq('id', conversationId)
-        .then(() => {}, () => {});
+        .then(
+          () => {},
+          () => {}
+        );
     }
   } catch {}
 
@@ -1352,23 +1734,22 @@ export function blockConversation(
   }
 
   notifyChange();
-  return convs[cIdx];
+  return memoryConversations[cIdx];
 }
 
-export function unblockConversation(conversationId: string): Conversation | null {
-  const convs = loadConversations();
-  const cIdx = convs.findIndex((c) => c.id === conversationId);
+export function unblockConversation(
+  conversationId: string
+): Conversation | null {
+  const cIdx = memoryConversations.findIndex((c) => c.id === conversationId);
   if (cIdx === -1) return null;
 
   const now = new Date().toISOString();
-  convs[cIdx].is_blocked = false;
-  convs[cIdx].blocked_by = undefined;
-  convs[cIdx].blocked_by_type = undefined;
-  convs[cIdx].blocked_at = undefined;
-  convs[cIdx].is_reported = false;
-  convs[cIdx].updated_at = now;
-
-  saveConversations(convs);
+  memoryConversations[cIdx].is_blocked = false;
+  memoryConversations[cIdx].blocked_by = undefined;
+  memoryConversations[cIdx].blocked_by_type = undefined;
+  memoryConversations[cIdx].blocked_at = undefined;
+  memoryConversations[cIdx].is_reported = false;
+  memoryConversations[cIdx].updated_at = now;
 
   try {
     const sb = getSupabaseClient();
@@ -1383,7 +1764,10 @@ export function unblockConversation(conversationId: string): Conversation | null
           updated_at: now,
         })
         .eq('id', conversationId)
-        .then(() => {}, () => {});
+        .then(
+          () => {},
+          () => {}
+        );
     }
   } catch {}
 
@@ -1398,17 +1782,11 @@ export function unblockConversation(conversationId: string): Conversation | null
   }
 
   notifyChange();
-  return convs[cIdx];
+  return memoryConversations[cIdx];
 }
 
 export function loadSignalements(): Signalement[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_SIGNALEMENTS);
-    const list: Signalement[] = raw ? JSON.parse(raw) : [];
-    return list;
-  } catch {
-    return [];
-  }
+  return memorySignalements;
 }
 
 export function updateSignalementStatus(
@@ -1416,11 +1794,9 @@ export function updateSignalementStatus(
   status: 'resolved' | 'ignored' | 'banned',
   unblockConversationId?: string
 ) {
-  const list = loadSignalements();
-  const idx = list.findIndex((s) => s.id === signalementId);
+  const idx = memorySignalements.findIndex((s) => s.id === signalementId);
   if (idx !== -1) {
-    list[idx].status = status;
-    localStorage.setItem(LOCAL_STORAGE_SIGNALEMENTS, JSON.stringify(list));
+    memorySignalements[idx].status = status;
   }
 
   if (unblockConversationId) {
@@ -1433,7 +1809,10 @@ export function updateSignalementStatus(
       sb.from('signalements')
         .update({ status })
         .eq('id', signalementId)
-        .then(() => {}, () => {});
+        .then(
+          () => {},
+          () => {}
+        );
     }
   } catch {}
 
@@ -1445,15 +1824,14 @@ export function getUnreadConversationsCount(
   userType: 'pharma' | 'client',
   pharmacyId?: string
 ): number {
-  const convs = loadConversations();
   if (userType === 'pharma') {
-    return convs.filter(
+    return memoryConversations.filter(
       (c) =>
         (c.pharmacy_user_id === userId || c.pharmacy_id === pharmacyId) &&
         (c.unread_count_pharmacy || 0) > 0
     ).length;
   } else {
-    return convs.filter(
+    return memoryConversations.filter(
       (c) =>
         (c.client_id === userId || !userId) &&
         (c.unread_count_client || 0) > 0
@@ -1463,12 +1841,7 @@ export function getUnreadConversationsCount(
 
 /**
  * AUTO CLEAN 24H (MESSAGES & PHOTOS) :
- * - Supprime tous les messages dont expires_at < now() ou créés il y a plus de 24h
- * - Exécute la suppression locale dans localStorage
- * - Exécute le DELETE SQL sur Supabase:
- *   DELETE FROM messages WHERE created_at < NOW() - INTERVAL '24 hours';
- *   DELETE FROM messages WHERE expires_at < NOW();
- * - Invoque l'Edge Function cleanup-garde pour purger garde.messages et storage.objects
+ * DELETE FROM messages WHERE created_at < NOW() - INTERVAL '24 hours'
  */
 export async function cleanExpiredMessages(): Promise<number> {
   const now = Date.now();
@@ -1476,37 +1849,22 @@ export async function cleanExpiredMessages(): Promise<number> {
   const threshold24hIso = new Date(now - MS_24_HOURS).toISOString();
   let cleanedCount = 0;
 
-  // 1. Nettoyage LocalStorage
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
-    if (raw) {
-      const all: Record<string, Message[]> = JSON.parse(raw);
-      let modified = false;
-      for (const convId of Object.keys(all)) {
-        const initialLen = all[convId].length;
-        all[convId] = all[convId].filter((m) => !isMessageExpired(m));
-        if (all[convId].length !== initialLen) {
-          cleanedCount += (initialLen - all[convId].length);
-          modified = true;
-        }
-      }
-      if (modified) {
-        localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
-        notifyChange();
-      }
+  for (const convId of Object.keys(memoryMessages)) {
+    const initialLen = memoryMessages[convId].length;
+    memoryMessages[convId] = memoryMessages[convId].filter(
+      (m) => !isMessageExpired(m)
+    );
+    if (memoryMessages[convId].length !== initialLen) {
+      cleanedCount += initialLen - memoryMessages[convId].length;
     }
-  } catch (err) {
-    console.warn('Erreur cleanExpiredMessages local:', err);
   }
 
-  // 2. Nettoyage cloud Supabase : DELETE FROM messages WHERE created_at < NOW() - INTERVAL '24 hours'
   try {
     const sb = getSupabaseClient();
     if (sb) {
       await sb.from('messages').delete().lt('expires_at', nowIso);
       await sb.from('messages').delete().lt('created_at', threshold24hIso);
 
-      // Invoque l'Edge Function cleanup-garde pour suppression auto 24h côté serveur
       sb.functions
         .invoke('cleanup-garde')
         .then(() => {})
@@ -1516,24 +1874,23 @@ export async function cleanExpiredMessages(): Promise<number> {
     console.log('Auto clean sync:', err);
   }
 
+  if (cleanedCount > 0) {
+    notifyChange();
+  }
   return cleanedCount;
 }
 
-/**
- * Upload Audio ou Image vers Supabase Storage :
- * - Bucket 'garde-photo' (avec fallback 'garde-ordonnances' et 'chat-media')
- * - Max 500 Ko par fichier compressé
- * - Refus strict si > 1 Mo
- */
 export async function uploadMediaToSupabase(
   fileOrBlob: Blob | File,
   folder: 'audio' | 'images',
   filename?: string
 ): Promise<string> {
-  // 3. Stockage : Validation de taille et de type MIME stricte
   const validation = validateUploadedFile(fileOrBlob, 1024 * 1024);
   if (!validation.isValid) {
-    throw new Error(validation.error || 'Fichier non autorisé (max 1 Mo, extensions exécutables interdites).');
+    throw new Error(
+      validation.error ||
+        'Fichier non autorisé (max 1 Mo, extensions exécutables interdites).'
+    );
   }
 
   const sb = getSupabaseClient();
@@ -1547,7 +1904,6 @@ export async function uploadMediaToSupabase(
     ? 'image/webp'
     : fileOrBlob.type || 'audio/webm';
 
-  // Buckets cibles autorisés : priorité 'garde-photo', puis 'garde-ordonnances', puis 'chat-media'
   const targetBuckets = ['garde-photo', 'garde-ordonnances', 'chat-media'];
 
   try {
@@ -1579,7 +1935,6 @@ export async function uploadMediaToSupabase(
     console.warn('Storage direct upload non dispo, bascule en Data URL:', err);
   }
 
-  // Fallback garanti en Data URL (stockage sécurisé immédiat et lecture instantanée)
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result as string);
@@ -1589,23 +1944,198 @@ export async function uploadMediaToSupabase(
 }
 
 /* ===============================
-   Realtime Presence Simulation
+   GARDES, PUBS & STATS
    =============================== */
-const activePresenceMap = new Map<string, PresenceState>();
 
-export function trackPresence(state: PresenceState, onPresenceUpdate: (all: PresenceState[]) => void): () => void {
+export function loadGardes(pharmacieId?: string): Garde[] {
+  if (pharmacieId) {
+    return memoryGardes.filter((g) => g.pharmacie_id === pharmacieId);
+  }
+  return memoryGardes;
+}
+
+export function addGarde(garde: Omit<Garde, 'id'>): Garde {
+  const newGarde: Garde = {
+    ...garde,
+    id: 'garde-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+  };
+  memoryGardes.push(newGarde);
+  notifyChange();
+  return newGarde;
+}
+
+export function deleteGarde(id: string) {
+  const idx = memoryGardes.findIndex((g) => g.id === id);
+  if (idx !== -1) {
+    memoryGardes.splice(idx, 1);
+    notifyChange();
+  }
+}
+
+export function isPharmacyCurrentlyOnDuty(pharmacieId: string): boolean {
+  const gardes = loadGardes(pharmacieId);
+  const now = new Date().getTime();
+  return gardes.some((g) => {
+    const start = new Date(g.date_debut).getTime();
+    const end = new Date(g.date_fin).getTime();
+    return now >= start && now <= end;
+  });
+}
+
+export function trackItineraryClick(pharmaId: string): void {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!memoryItineraryClicks[pharmaId]) {
+    memoryItineraryClicks[pharmaId] = { total: 0, dates: {} };
+  }
+  memoryItineraryClicks[pharmaId].total += 1;
+  memoryItineraryClicks[pharmaId].dates[today] =
+    (memoryItineraryClicks[pharmaId].dates[today] || 0) + 1;
+  notifyChange();
+}
+
+export function getItineraryClicks(pharmaId: string): {
+  today: number;
+  total: number;
+} {
+  const today = new Date().toISOString().slice(0, 10);
+  const entry = memoryItineraryClicks[pharmaId];
+  if (!entry) return { today: 0, total: 0 };
+  return {
+    today: entry.dates?.[today] || 0,
+    total: entry.total || 0,
+  };
+}
+
+export function loadPubs(): Pub[] {
+  return memoryPubs;
+}
+
+export function savePubs(list: Pub[]) {
+  memoryPubs = list;
+  notifyChange();
+}
+
+export function loadAllDailyStats(): PharmacyDailyStat[] {
+  return memoryStats;
+}
+
+export function saveAllDailyStats(stats: PharmacyDailyStat[]): void {
+  memoryStats = stats;
+  notifyChange();
+}
+
+export function recordClientContact(pharmacieId: string): number {
+  if (!pharmacieId) return 0;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const targetIndex = memoryStats.findIndex(
+    (s) => s.pharmacie_id === pharmacieId && s.date === todayStr
+  );
+
+  let newCount = 1;
+  if (targetIndex >= 0) {
+    memoryStats[targetIndex].client_count += 1;
+    newCount = memoryStats[targetIndex].client_count;
+  } else {
+    memoryStats.push({
+      pharmacie_id: pharmacieId,
+      date: todayStr,
+      client_count: 1,
+    });
+  }
+
+  notifyChange();
+
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      Promise.resolve(
+        client.from('stats').upsert(
+          {
+            pharmacie_id: pharmacieId,
+            date: todayStr,
+            client_count: newCount,
+          },
+          { onConflict: 'pharmacie_id,date' }
+        )
+      )
+        .then(() => {})
+        .catch(() => {});
+    }
+  } catch {}
+
+  return newCount;
+}
+
+export interface PharmacyStatsSummary {
+  pharmacie_id: string;
+  totalThisWeek: number;
+  totalThisMonth: number;
+  conversationsHandled: number;
+  dailyStats7Days: { date: string; label: string; count: number }[];
+  dailyStats30Days: { date: string; label: string; count: number }[];
+}
+
+export function getPharmacyStats(pharmacieId: string): PharmacyStatsSummary {
+  const now = new Date();
+  const pharmaStats = memoryStats.filter((s) => s.pharmacie_id === pharmacieId);
+  const statsMap = new Map<string, number>();
+  pharmaStats.forEach((s) => {
+    statsMap.set(s.date, (statsMap.get(s.date) || 0) + s.client_count);
+  });
+
+  const dailyStats7Days: { date: string; label: string; count: number }[] = [];
+  const dayLabels = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  let totalThisWeek = 0;
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(now.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+    const label =
+      i === 0 ? "Aujourd'hui" : dayLabels[d.getDay()] + ' ' + d.getDate();
+    const count = statsMap.get(dateStr) || 0;
+    dailyStats7Days.push({ date: dateStr, label, count });
+    totalThisWeek += count;
+  }
+
+  const dailyStats30Days: { date: string; label: string; count: number }[] = [];
+  let totalThisMonth = 0;
+
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(now.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+    const dayOfMonth = d.getDate();
+    const monthIndex = d.getMonth() + 1;
+    const label = `${dayOfMonth}/${monthIndex < 10 ? '0' : ''}${monthIndex}`;
+    const count = statsMap.get(dateStr) || 0;
+    dailyStats30Days.push({ date: dateStr, label, count });
+    totalThisMonth += count;
+  }
+
+  const conversations = loadConversations(pharmacieId);
+  return {
+    pharmacie_id: pharmacieId,
+    totalThisWeek,
+    totalThisMonth,
+    conversationsHandled: conversations.length,
+    dailyStats7Days,
+    dailyStats30Days,
+  };
+}
+
+export function trackPresence(
+  state: PresenceState,
+  onPresenceUpdate: (all: PresenceState[]) => void
+): () => void {
+  const activePresenceMap = new Map<string, PresenceState>();
   activePresenceMap.set(state.userId, state);
-  
+
   const broadcast = () => {
     if (presenceBus) {
       try {
-        presenceBus.postMessage({
-          type: 'PRESENCE_PING',
-          state
-        });
-      } catch {
-        // ignore
-      }
+        presenceBus.postMessage({ type: 'PRESENCE_PING', state });
+      } catch {}
     }
   };
 
@@ -1622,7 +2152,6 @@ export function trackPresence(state: PresenceState, onPresenceUpdate: (all: Pres
   if (presenceBus) {
     presenceBus.addEventListener('message', handleMessage);
   }
-
   onPresenceUpdate(Array.from(activePresenceMap.values()));
 
   return () => {
@@ -1633,653 +2162,10 @@ export function trackPresence(state: PresenceState, onPresenceUpdate: (all: Pres
       try {
         presenceBus.postMessage({
           type: 'PRESENCE_LEAVE',
-          userId: state.userId
+          userId: state.userId,
         });
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
-  };
-}
-
-/* ===============================
-   Pharmacies Pending (En attente de vérification)
-   =============================== */
-const LOCAL_STORAGE_PHARMACIES_PENDING = 'efa_pharmacies_pending_v1';
-
-export function loadPendingPharmacies(): PharmaciePending[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_PHARMACIES_PENDING);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const uniqueMap = new Map<string, PharmaciePending>();
-        for (const item of parsed) {
-          if (item && item.id && !uniqueMap.has(item.id)) {
-            uniqueMap.set(item.id, item);
-          }
-        }
-        const result = Array.from(uniqueMap.values());
-        if (result.length !== parsed.length) {
-          localStorage.setItem(LOCAL_STORAGE_PHARMACIES_PENDING, JSON.stringify(result));
-        }
-        return result;
-      }
-    }
-  } catch {
-    // fallback
-  }
-  return [];
-}
-
-export function savePendingPharmacies(list: PharmaciePending[]) {
-  const uniqueMap = new Map<string, PharmaciePending>();
-  for (const item of list) {
-    if (item && item.id && !uniqueMap.has(item.id)) {
-      uniqueMap.set(item.id, item);
-    }
-  }
-  const cleanList = Array.from(uniqueMap.values());
-  localStorage.setItem(LOCAL_STORAGE_PHARMACIES_PENDING, JSON.stringify(cleanList));
-  notifyChange();
-}
-
-export async function addPendingPharmacy(
-  entry: Omit<PharmaciePending, 'id' | 'statut' | 'created_at'>
-): Promise<PharmaciePending> {
-  const newPending: PharmaciePending = {
-    ...entry,
-    id: 'pending-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    statut: 'en_attente',
-    created_at: new Date().toISOString(),
-  };
-
-  const list = loadPendingPharmacies();
-  list.unshift(newPending);
-  savePendingPharmacies(list);
-
-  // Sync avec la table Supabase pharmacies_pending et pharmacies
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      await client.from('pharmacies_pending').insert([
-        {
-          id: newPending.id,
-          nom: entry.nom,
-          quartier: entry.quartier,
-          adresse: entry.adresse,
-          phone: entry.phone,
-          titulaire: entry.titulaire,
-          lat: entry.lat,
-          lng: entry.lng,
-          photo_url: entry.photo_url || null,
-          statut: 'pending',
-        },
-      ]).then(() => {}, () => {});
-
-      // S'assure que la pharmacie est créée avec statut pending (invisible pour les clients)
-      await client.from('pharmacies').upsert([
-        {
-          id: newPending.id,
-          nom: entry.nom,
-          quartier: entry.quartier,
-          adresse: entry.adresse,
-          tel: entry.phone,
-          titulaire: entry.titulaire,
-          lat: entry.lat,
-          lng: entry.lng,
-          photo_url: entry.photo_url || null,
-          email_pro: entry.email_pro,
-          statut: 'pending',
-          is_active: false,
-          is_pending: true,
-        },
-      ]).then(() => {}, () => {});
-    }
-  } catch (err) {
-    console.warn('[EFA GARDE] pharmacies_pending offline fallback:', err);
-  }
-
-  notifyChange();
-  return newPending;
-}
-
-/**
- * Seules les pharmacies approuvées et validées par le Super Admin sont visibles sur l'application publique !
- * Avant validation, les officines enregistrées restent 100% invisibles sur la carte et la liste.
- */
-export function loadAllPharmaciesWithPending(): Pharmacie[] {
-  return loadApprovedPharmacies();
-}
-
-export function loadApprovedPharmacies(): Pharmacie[] {
-  const all = loadPharmacies();
-  return all.filter((p) => {
-    if (isDemoPharmacy(p)) return false;
-    if (p.is_pending === true) return false;
-    if (p.statut === 'pending' || p.statut === 'en_attente' || p.statut === 'rejected') return false;
-    if (p.is_active === false) return false;
-    return true;
-  });
-}
-
-/**
- * Super Admin valide l'inscription de l'officine ("Quelqu'un a souscrit")
- * Seulement après validation, l'officine devient visible sur l'application publique !
- */
-export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
-  const allPharmacies = loadPharmacies();
-  let found = allPharmacies.find((p) => p.id === id);
-
-  const pendingList = loadPendingPharmacies();
-  const pendingItem = pendingList.find((p) => p.id === id);
-
-  if (pendingItem) {
-    if (!found) {
-      found = {
-        id: pendingItem.id,
-        nom: pendingItem.nom,
-        tel: pendingItem.phone,
-        lat: pendingItem.lat,
-        lng: pendingItem.lng,
-        adresse: pendingItem.adresse,
-        quartier: pendingItem.quartier,
-        titulaire: pendingItem.titulaire,
-        email_pro: pendingItem.email_pro,
-        plan: 'free',
-        is_online: true,
-        is_active: true,
-        is_pending: false,
-        statut: 'approved',
-        photo_url: pendingItem.photo_url,
-      };
-      allPharmacies.unshift(found);
-    } else {
-      found.is_active = true;
-      found.is_pending = false;
-      found.statut = 'approved';
-    }
-    const updatedPending = pendingList.filter((p) => p.id !== id);
-    savePendingPharmacies(updatedPending);
-  } else if (found) {
-    found.is_active = true;
-    found.is_pending = false;
-    found.statut = 'approved';
-  }
-
-  savePharmacies(allPharmacies);
-
-  // Synchronisation Supabase : la pharmacie devient approved et is_active = true
-  try {
-    const sb = getSupabaseClient();
-    if (sb) {
-      if (found) {
-        await sb.from('pharmacies').upsert({
-          id: found.id,
-          nom: found.nom,
-          tel: found.tel,
-          lat: found.lat,
-          lng: found.lng,
-          adresse: found.adresse,
-          quartier: found.quartier,
-          titulaire: found.titulaire,
-          email_pro: found.email_pro,
-          is_active: true,
-          is_pending: false,
-          statut: 'approved',
-          photo_url: found.photo_url || null,
-        });
-      }
-      await sb.from('pharmacies_pending').update({ statut: 'approved' }).eq('id', id).then(() => {}, () => {});
-    }
-  } catch (err) {
-    console.warn('[EFA] approvePharmacySuperAdmin supabase warning:', err);
-  }
-
-  notifyChange();
-  return true;
-}
-
-/**
- * Super Admin refuse une demande de pharmacie
- */
-export async function rejectPharmacySuperAdmin(id: string): Promise<boolean> {
-  const pendingList = loadPendingPharmacies().filter((p) => p.id !== id);
-  savePendingPharmacies(pendingList);
-
-  const allPharmacies = loadPharmacies().filter((p) => p.id !== id);
-  savePharmacies(allPharmacies);
-
-  try {
-    const sb = getSupabaseClient();
-    if (sb) {
-      await sb.from('pharmacies_pending').update({ statut: 'rejected' }).eq('id', id).then(() => {}, () => {});
-      await sb.from('pharmacies').update({ statut: 'rejected', is_active: false }).eq('id', id).then(() => {}, () => {});
-    }
-  } catch {}
-
-  notifyChange();
-  return true;
-}
-
-/* ===============================
-   Compteur clics Itinéraire ("Combien de personnes ont cliqué Itinéraire")
-   =============================== */
-const LOCAL_STORAGE_ITINERARY_CLICKS = 'efa_itinerary_clicks_v1';
-
-interface ItineraryRecord {
-  [pharmaId: string]: {
-    total: number;
-    dates: { [dateStr: string]: number };
-  };
-}
-
-export function trackItineraryClick(pharmaId: string): void {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_ITINERARY_CLICKS);
-    const data: ItineraryRecord = raw ? JSON.parse(raw) : {};
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (!data[pharmaId]) {
-      data[pharmaId] = { total: 0, dates: {} };
-    }
-    data[pharmaId].total = (data[pharmaId].total || 0) + 1;
-    data[pharmaId].dates[today] = (data[pharmaId].dates[today] || 0) + 1;
-
-    localStorage.setItem(LOCAL_STORAGE_ITINERARY_CLICKS, JSON.stringify(data));
-    notifyChange();
-  } catch (err) {
-    console.error('Failed to track itinerary click:', err);
-  }
-}
-
-export function getItineraryClicks(pharmaId: string): { today: number; total: number } {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_ITINERARY_CLICKS);
-    const today = new Date().toISOString().slice(0, 10);
-    if (!raw) return { today: 0, total: 0 };
-    const data: ItineraryRecord = JSON.parse(raw);
-    const entry = data[pharmaId];
-    if (!entry) return { today: 0, total: 0 };
-    return {
-      today: entry.dates?.[today] || 0,
-      total: entry.total || 0,
-    };
-  } catch {
-    return { today: 0, total: 0 };
-  }
-}
-
-/* ===============================
-   ADMIN: Validation & Refus Pharmacies
-   =============================== */
-export async function approvePendingPharmacy(pendingId: string): Promise<Pharmacie | null> {
-  const pendingList = loadPendingPharmacies();
-  const targetIdx = pendingList.findIndex((p) => p.id === pendingId);
-  if (targetIdx === -1) return null;
-
-  const target = pendingList[targetIdx];
-  target.statut = 'approved';
-  savePendingPharmacies(pendingList);
-
-  // Copie vers pharmacies officielles
-  const approvedPharmacy: Pharmacie = {
-    id: 'pharma-' + Date.now(),
-    nom: target.nom,
-    tel: target.phone,
-    lat: target.lat,
-    lng: target.lng,
-    adresse: target.adresse,
-    plan: '60k', // Activée officiellement avec plan complet
-    is_online: true, // Passe sur la carte publique en vert
-    quartier: target.quartier,
-    titulaire: target.titulaire,
-    numero_ordre: target.numero_ordre,
-    photo_url: target.photo_url,
-    piece_url: target.piece_url,
-    email_pro: target.email_pro,
-    mot_de_passe: target.mot_de_passe,
-    statut: 'approved',
-    itinerary_clicks: 0,
-  };
-
-  const currentPharmacies = loadPharmacies();
-  currentPharmacies.unshift(approvedPharmacy);
-  savePharmacies(currentPharmacies);
-
-  // Sync EFA GARDE
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      await client
-        .from('pharmacies_pending')
-        .update({ statut: 'approved' })
-        .eq('id', pendingId);
-
-      await client.from('pharmacies').insert([
-        {
-          nom: approvedPharmacy.nom,
-          tel: approvedPharmacy.tel,
-          lat: approvedPharmacy.lat,
-          lng: approvedPharmacy.lng,
-          adresse: approvedPharmacy.adresse,
-          plan: approvedPharmacy.plan,
-          is_online: approvedPharmacy.is_online,
-        },
-      ]);
-      console.log('✅ Pharmacie approuvée et enregistrée !');
-    }
-  } catch (err) {
-    console.warn('Approve sync error:', err);
-  }
-
-  notifyChange();
-  return approvedPharmacy;
-}
-
-export async function rejectPendingPharmacy(pendingId: string): Promise<boolean> {
-  const pendingList = loadPendingPharmacies();
-  const targetIdx = pendingList.findIndex((p) => p.id === pendingId);
-  if (targetIdx === -1) return false;
-
-  pendingList[targetIdx].statut = 'rejected';
-  savePendingPharmacies(pendingList);
-
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      await client
-        .from('pharmacies_pending')
-        .update({ statut: 'rejected' })
-        .eq('id', pendingId);
-    }
-  } catch (err) {
-    console.warn('Reject sync error:', err);
-  }
-
-  notifyChange();
-  return true;
-}
-
-/* ===============================
-   Pubs (Espace Pub Sponsorisé)
-   =============================== */
-const LOCAL_STORAGE_PUBS = 'efa_pubs_v1';
-
-export function loadPubs(): Pub[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_PUBS);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {
-    // fallback
-  }
-  return [];
-}
-
-export function savePubs(list: Pub[]) {
-  localStorage.setItem(LOCAL_STORAGE_PUBS, JSON.stringify(list));
-  notifyChange();
-}
-
-/**
- * Enregistrement nouvelle pharmacie depuis formulaire /pharma/login
- * Insert table pharmacies (avec statut pending) + table pharmacies_pending
- */
-export async function registerNewPharmacy(data: {
-  nom: string;
-  adresse: string;
-  lat: number;
-  lng: number;
-  tel: string;
-  is_online: boolean; // Garde (oui/non)
-  horaires?: string;
-  quartier?: string;
-  titulaire?: string;
-}): Promise<Pharmacie> {
-  const newPharmaId =
-    'pharma-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-  const newPharmacy: Pharmacie = {
-    id: newPharmaId,
-    nom: data.nom.trim(),
-    adresse: data.adresse.trim(),
-    lat: data.lat || 6.1319,
-    lng: data.lng || 1.2228,
-    tel: data.tel.trim(),
-    plan: 'free',
-    is_online: Boolean(data.is_online),
-    horaires: data.horaires?.trim() || '24h/24',
-    quartier: data.quartier?.trim() || 'Lomé',
-    titulaire: data.titulaire?.trim() || 'Titulaire Officine',
-    statut: 'pending',
-    is_pending: true,
-  };
-
-  // 1. Sauvegarder dans pharmacies locales (sans doublons)
-  const allPharmacies = loadPharmacies().filter(
-    (p) => p.id !== newPharmaId && p.nom.trim().toLowerCase() !== newPharmacy.nom.toLowerCase()
-  );
-  allPharmacies.unshift(newPharmacy);
-  savePharmacies(allPharmacies);
-
-  // 2. Sauvegarder dans pending list avec identifiant distinct
-  const pendingId =
-    'pending-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-  const pendingEntry: PharmaciePending = {
-    id: pendingId,
-    nom: newPharmacy.nom,
-    adresse: newPharmacy.adresse,
-    phone: newPharmacy.tel,
-    lat: newPharmacy.lat,
-    lng: newPharmacy.lng,
-    quartier: newPharmacy.quartier || 'Lomé',
-    titulaire: newPharmacy.titulaire || 'Titulaire Officine',
-    statut: 'pending',
-    created_at: new Date().toISOString(),
-  };
-  const pendingList = loadPendingPharmacies().filter(
-    (p) => p.nom.trim().toLowerCase() !== newPharmacy.nom.toLowerCase()
-  );
-  pendingList.unshift(pendingEntry);
-  savePendingPharmacies(pendingList);
-
-  // 3. Insert Supabase tables
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      // Insert in pharmacies table
-      await client.from('pharmacies').insert([
-        {
-          nom: newPharmacy.nom,
-          tel: newPharmacy.tel,
-          lat: newPharmacy.lat,
-          lng: newPharmacy.lng,
-          adresse: newPharmacy.adresse,
-          plan: 'free',
-          is_online: newPharmacy.is_online,
-        },
-      ]);
-
-      // Insert in pharmacies_pending table
-      await client.from('pharmacies_pending').insert([
-        {
-          nom: newPharmacy.nom,
-          adresse: newPharmacy.adresse,
-          phone: newPharmacy.tel,
-          lat: newPharmacy.lat,
-          lng: newPharmacy.lng,
-          quartier: newPharmacy.quartier,
-          titulaire: newPharmacy.titulaire,
-          statut: 'pending',
-          horaires: newPharmacy.horaires,
-        },
-      ]);
-    }
-  } catch (err) {
-    console.warn('Register fallback:', err);
-  }
-
-  notifyChange();
-  return newPharmacy;
-}
-
-/* =========================================================
-   PHARMACY STATS & CLIENT CONTACT TRACKING
-   Table stats: pharmacie_id, date (YYYY-MM-DD), client_count
-   ========================================================= */
-
-export function loadAllDailyStats(): PharmacyDailyStat[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_STATS);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {
-    // fallback
-  }
-  return [];
-}
-
-export function saveAllDailyStats(stats: PharmacyDailyStat[]): void {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_STATS, JSON.stringify(stats));
-  } catch (err) {
-    console.warn('Erreur sauvegarde stats:', err);
-  }
-}
-
-/**
- * Enregistre et incrémente le contact client pour la pharmacie :
- * Appelé quand un client clique sur "Contacter" / "Chat Live" ou envoie un message.
- * Stocke dans table stats: pharmacie_id, date, client_count
- */
-export function recordClientContact(pharmacieId: string): number {
-  if (!pharmacieId) return 0;
-
-  const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const allStats = loadAllDailyStats();
-
-  const targetIndex = allStats.findIndex(
-    (s) => s.pharmacie_id === pharmacieId && s.date === todayStr
-  );
-
-  let newCount = 1;
-  if (targetIndex >= 0) {
-    allStats[targetIndex].client_count += 1;
-    newCount = allStats[targetIndex].client_count;
-  } else {
-    allStats.push({
-      pharmacie_id: pharmacieId,
-      date: todayStr,
-      client_count: 1,
-    });
-  }
-
-  saveAllDailyStats(allStats);
-  notifyChange();
-
-  // Synchronisation Supabase table stats: pharmacie_id, date, client_count
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      Promise.resolve(
-        client
-          .from('stats')
-          .upsert(
-            {
-              pharmacie_id: pharmacieId,
-              date: todayStr,
-              client_count: newCount,
-            },
-            { onConflict: 'pharmacie_id,date' }
-          )
-      )
-        .then(() => {})
-        .catch((err: unknown) => {
-          console.log(
-            'Stats sync info:',
-            err instanceof Error ? err.message : 'mode autonome'
-          );
-        });
-    }
-  } catch {
-    // continue
-  }
-
-  return newCount;
-}
-
-export interface PharmacyStatsSummary {
-  pharmacie_id: string;
-  totalThisWeek: number;
-  totalThisMonth: number;
-  conversationsHandled: number;
-  dailyStats7Days: { date: string; label: string; count: number }[];
-  dailyStats30Days: { date: string; label: string; count: number }[];
-}
-
-export function getPharmacyStats(pharmacieId: string): PharmacyStatsSummary {
-  const allStats = loadAllDailyStats();
-  const pharmaStats = allStats.filter((s) => s.pharmacie_id === pharmacieId);
-  return getPharmacyStatsCalculated(pharmacieId, pharmaStats);
-}
-
-function getPharmacyStatsCalculated(
-  pharmacieId: string,
-  pharmaStats: PharmacyDailyStat[]
-): PharmacyStatsSummary {
-  const now = new Date();
-  const statsMap = new Map<string, number>();
-  pharmaStats.forEach((s) => {
-    statsMap.set(s.date, (statsMap.get(s.date) || 0) + s.client_count);
-  });
-
-  // 7 derniers jours
-  const dailyStats7Days: { date: string; label: string; count: number }[] = [];
-  const dayLabels = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
-  let totalThisWeek = 0;
-
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    const label =
-      i === 0 ? "Aujourd'hui" : dayLabels[d.getDay()] + ' ' + d.getDate();
-    const count = statsMap.get(dateStr) || 0;
-    dailyStats7Days.push({ date: dateStr, label, count });
-    totalThisWeek += count;
-  }
-
-  // 30 derniers jours
-  const dailyStats30Days: { date: string; label: string; count: number }[] = [];
-  let totalThisMonth = 0;
-
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    const dayOfMonth = d.getDate();
-    const monthIndex = d.getMonth() + 1;
-    const label = `${dayOfMonth}/${monthIndex < 10 ? '0' : ''}${monthIndex}`;
-    const count = statsMap.get(dateStr) || 0;
-    dailyStats30Days.push({ date: dateStr, label, count });
-    totalThisMonth += count;
-  }
-
-  // Nombre de conversations prises en charge
-  const conversations = loadConversations(pharmacieId);
-  const conversationsHandled = conversations.length;
-
-  return {
-    pharmacie_id: pharmacieId,
-    totalThisWeek,
-    totalThisMonth,
-    conversationsHandled,
-    dailyStats7Days,
-    dailyStats30Days,
   };
 }
 
@@ -2306,14 +2192,14 @@ export function initSupabaseRealtime(): void {
             const newMsg = payload.new;
             const convId = newMsg.conversation_id;
             if (convId) {
-              const allRaw = localStorage.getItem(LOCAL_STORAGE_MESSAGES);
-              const all: Record<string, Message[]> = allRaw ? JSON.parse(allRaw) : {};
-              const list = all[convId] || [];
+              const list = memoryMessages[convId] || [];
               if (!list.some((m) => m.id === newMsg.id)) {
                 list.push({
                   id: newMsg.id,
                   conversation_id: convId,
-                  sender: newMsg.sender || (newMsg.sender_type === 'pharma' ? 'pharma' : 'client'),
+                  sender:
+                    newMsg.sender ||
+                    (newMsg.sender_type === 'pharma' ? 'pharma' : 'client'),
                   sender_id: newMsg.sender_id,
                   receiver_id: newMsg.receiver_id,
                   text: newMsg.text || newMsg.content || '',
@@ -2325,8 +2211,7 @@ export function initSupabaseRealtime(): void {
                   media_url: newMsg.media_url,
                   audio_duration: newMsg.audio_duration,
                 });
-                all[convId] = list;
-                localStorage.setItem(LOCAL_STORAGE_MESSAGES, JSON.stringify(all));
+                memoryMessages[convId] = list;
               }
             }
           }
@@ -2345,7 +2230,7 @@ export function initSupabaseRealtime(): void {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'pharmacies' },
         () => {
-          fetchPharmacies().catch(() => {});
+          fetchApprovedPharmacies().catch(() => {});
           notifyChange();
         }
       )
@@ -2378,7 +2263,26 @@ export function initSupabaseRealtime(): void {
   }
 }
 
-if (typeof window !== 'undefined') {
-  initSupabaseRealtime();
+/**
+ * CHARGEMENT INITIAL DEPUIS SUPABASE :
+ * Même si le cache du navigateur est vidé à 100%, cette routine télécharge
+ * immédiatement les pharmacies validées, les abonnements, les clients et le chat.
+ */
+export async function bootstrapStoreFromSupabase(): Promise<void> {
+  try {
+    await Promise.allSettled([
+      fetchApprovedPharmacies(),
+      fetchPendingPharmacies(),
+      fetchDemandesAbonnement(),
+      fetchClientsCount(),
+      fetchConversations(),
+    ]);
+  } catch (err) {
+    console.warn('[EFA GARDE] bootstrapStoreFromSupabase error:', err);
+  }
 }
 
+if (typeof window !== 'undefined') {
+  initSupabaseRealtime();
+  bootstrapStoreFromSupabase().catch(() => {});
+}

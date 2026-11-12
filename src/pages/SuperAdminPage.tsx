@@ -17,6 +17,7 @@ import {
   fetchDemandesAbonnement,
   validateSubscriptionPaymentAndGenerateCode,
   loadPendingPharmacies,
+  fetchPendingPharmacies,
   approvePharmacySuperAdmin,
   rejectPharmacySuperAdmin,
 } from '../services/store';
@@ -175,7 +176,6 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
           .order('created_at', { ascending: false });
         if (data && data.length > 0) {
           setSignalements(data);
-          localStorage.setItem('efa_signalements', JSON.stringify(data));
           return;
         }
       }
@@ -199,8 +199,13 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     } catch {}
   };
 
-  const refreshPending = () => {
-    setPendingPharmacies(loadPendingPharmacies());
+  const refreshPending = async () => {
+    try {
+      const p = await fetchPendingPharmacies();
+      setPendingPharmacies(p);
+    } catch {
+      setPendingPharmacies(loadPendingPharmacies());
+    }
   };
 
   // Listen to store updates

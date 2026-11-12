@@ -9,6 +9,8 @@ import {
   loadAllPharmaciesWithPending,
   subscribeToStore,
   cleanExpiredMessages,
+  fetchApprovedPharmacies,
+  initSupabaseRealtime,
 } from './services/store';
 import { getSession, clearSession, setSession } from './lib/auth';
 import { Map } from './pages/Map';
@@ -210,8 +212,15 @@ export default function App() {
     };
   }, []);
 
-  // Subscribe to store updates
+  // Initial load from Supabase & Subscribe to store updates
   useEffect(() => {
+    fetchApprovedPharmacies().then((data) => {
+      if (data && data.length > 0) {
+        setPharmacies(data);
+      }
+    }).catch(() => {});
+    initSupabaseRealtime();
+
     const unsubscribe = subscribeToStore(() => {
       setPharmacies(loadAllPharmaciesWithPending());
     });

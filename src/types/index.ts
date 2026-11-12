@@ -45,6 +45,8 @@ export interface Pharmacie {
   statut?: 'pending' | 'en_attente' | 'approved' | 'rejected';
   itinerary_clicks?: number;
   horaires?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Pub {
