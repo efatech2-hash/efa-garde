@@ -22,7 +22,13 @@ import {
   Check,
   Target,
   Sparkles,
+  Smartphone,
+  Download,
+  ExternalLink,
+  Share,
+  X,
 } from 'lucide-react';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface MapProps {
   pharmacies: Pharmacie[];
@@ -42,6 +48,21 @@ export const Map: React.FC<MapProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [onlyOnline, setOnlyOnline] = useState(false);
   const [shareFeedback, setShareFeedback] = useState(false);
+  const [showInstallHelpModal, setShowInstallHelpModal] = useState(false);
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+
+  const handleInstallWebApp = async () => {
+    if (isInstalled) {
+      return;
+    }
+    if (isInstallable) {
+      const outcome = await install();
+      if (outcome === 'accepted') {
+        return;
+      }
+    }
+    setShowInstallHelpModal(true);
+  };
 
   // Share handler
   const handleShare = async () => {
@@ -492,6 +513,123 @@ export const Map: React.FC<MapProps> = ({
 
         </div>
       </div>
+
+      {/* 4. SECTION TÉLÉCHARGER L'APPLICATION EFA GARDE */}
+      <section className="bg-slate-900/95 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-[#0b5cb5]/20 border border-[#0b5cb5]/40 flex items-center justify-center shrink-0">
+                <Smartphone className="w-5 h-5 text-blue-400" />
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-white tracking-tight">
+                Télécharger l&apos;application EFA Garde
+              </h2>
+            </div>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Accédez plus rapidement aux pharmacies de garde à Lomé depuis votre téléphone ou ordinateur.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+            <a
+              href="https://play.google.com/store/apps/details?id=com.efa.technologie.garde"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-h-[46px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all active:scale-95"
+            >
+              <ExternalLink className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Télécharger sur Google Play</span>
+            </a>
+
+            <button
+              type="button"
+              onClick={handleInstallWebApp}
+              disabled={isInstalled}
+              className={`min-h-[46px] px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all ${
+                isInstalled
+                  ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 cursor-default'
+                  : 'bg-[#0b5cb5] hover:bg-[#094b96] text-white shadow-md shadow-blue-900/40 cursor-pointer active:scale-95'
+              }`}
+            >
+              {isInstalled ? (
+                <>
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>Application Web installée</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span>Installer l&apos;application Web</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {showInstallHelpModal && (
+        <div
+          className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setShowInstallHelpModal(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-700 p-5 shadow-2xl text-slate-100 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-base font-extrabold text-white">
+                Installer l&apos;application Web EFA Garde
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowInstallHelpModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                aria-label="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {isIOS ? (
+              <div className="space-y-2.5 text-sm text-slate-300 leading-relaxed">
+                <p className="flex items-start gap-2">
+                  <span className="font-bold text-blue-400 shrink-0">1.</span>
+                  <span>
+                    Appuyez sur{' '}
+                    <span className="inline-flex items-center gap-1 font-semibold text-white">
+                      Partager <Share className="w-3.5 h-3.5 text-blue-400" />
+                    </span>{' '}
+                    dans la barre Safari.
+                  </span>
+                </p>
+                <p className="flex items-start gap-2">
+                  <span className="font-bold text-blue-400 shrink-0">2.</span>
+                  <span>
+                    Sélectionnez <strong className="text-white">Sur l&apos;écran d&apos;accueil</strong> puis confirmez.
+                  </span>
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2 text-sm text-slate-300 leading-relaxed">
+                <p>
+                  Ouvrez le menu de votre navigateur (Chrome / Edge / Samsung Internet) et appuyez sur{' '}
+                  <strong className="text-white">Installer l&apos;application</strong> ou{' '}
+                  <strong className="text-white">Ajouter à l&apos;écran d&apos;accueil</strong>.
+                </p>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowInstallHelpModal(false)}
+              className="w-full py-2.5 rounded-xl bg-[#0b5cb5] hover:bg-[#094b96] text-white text-sm font-bold transition-colors cursor-pointer"
+            >
+              Compris
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

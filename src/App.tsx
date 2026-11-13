@@ -37,6 +37,8 @@ import { WelcomeModal } from './components/WelcomeModal';
 import { LegalOnboardingModal } from './components/LegalOnboardingModal';
 import { hasUserConsentSync, checkUserConsent } from './services/consentService';
 import { useUnreadConversations } from './hooks/useUnreadConversations';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { supabase } from './lib/supabase';
 import {
   LogOut,
@@ -912,6 +914,9 @@ export default function App() {
 
             {/* Right Tools */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* Bouton PWA Installer l'application (masqué si déjà installée) */}
+              <PWAInstallButton />
+
               {/* BOUTON STATISTIQUES PHARMA */}
               {isPharmaUser && (
                 <button
@@ -1007,6 +1012,8 @@ export default function App() {
         onSelectClient={handleWelcomeSelectClient}
         onSelectPharma={handleWelcomeSelectPharma}
       />
+      {/* Indicateur mode hors ligne */}
+      <OfflineIndicator />
     </div>
   );
 }
