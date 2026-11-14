@@ -149,6 +149,24 @@ export function saveSupabaseConfig(url: string, anonKey: string) {
 
 let activeSupabaseClient: SupabaseClient | null = null;
 export function getSupabaseClient(): SupabaseClient | null {
+  const envUrl = (
+    import.meta.env.VITE_SUPABASE_URL ||
+    (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
+    ''
+  ).trim();
+  const envKey = (
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    (typeof process !== 'undefined' &&
+      (process.env?.VITE_SUPABASE_ANON_KEY ||
+        process.env?.VITE_SUPABASE_PUBLISHABLE_KEY)) ||
+    ''
+  ).trim();
+
+  if (envUrl && envKey) {
+    return supabase;
+  }
+
   const config = getStoredSupabaseConfig();
   if (config.url && config.anonKey) {
     if (!activeSupabaseClient) {
@@ -160,6 +178,50 @@ export function getSupabaseClient(): SupabaseClient | null {
     return activeSupabaseClient;
   }
   return supabase;
+}
+
+/**
+ * Enregistre un utilisateur dans `public.utilisateurs` et `public.users`
+ * Modèle identique à `user_consents` : INSERT direct via supabase.from(...).insert([...])
+ */
+export async function registerUserInDB(data: {
+  auth_user_id?: string | null;
+  email?: string | null;
+  nom: string;
+  role: 'client' | 'pharma' | 'admin' | 'super_admin';
+  telephone?: string | null;
+  pharmacie_id?: string | null;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const row = {
+    auth_user_id: data.auth_user_id || null,
+    email: data.email || null,
+    nom: data.nom,
+    role: data.role,
+    telephone: data.telephone || null,
+    pharmacie_id: data.pharmacie_id || null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { error: utilisateursError } = await sb
+        .from('utilisateurs')
+        .insert([row]);
+      if (utilisateursError) {
+        console.warn('[EFA GARDE] INSERT utilisateurs:', utilisateursError.message);
+      }
+
+      const { error: usersError } = await sb.from('users').insert([row]);
+      if (usersError) {
+        console.warn('[EFA GARDE] INSERT users:', usersError.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] registerUserInDB warning:', err);
+  }
 }
 
 /* ===============================
@@ -463,53 +525,100 @@ export async function addPendingPharmacy(
   memoryPendingPharmacies.unshift(newPending);
   memoryPharmacies.unshift(newPharma);
 
-  // Synchronisation directe dans Supabase table pharmacies
+  // Synchronisation directe dans Supabase (modèle exact user_consents)
   try {
     const client = getSupabaseClient();
     if (client) {
-      await client.from('pharmacies').upsert({
-        id,
-        nom: newPharma.nom,
-        tel: newPharma.tel,
-        lat: newPharma.lat,
-        lng: newPharma.lng,
-        adresse: newPharma.adresse,
-        quartier: newPharma.quartier,
-        titulaire: newPharma.titulaire,
-        numero_ordre: newPharma.numero_ordre,
-        piece_url: newPharma.piece_url,
-        photo_url: newPharma.photo_url || null,
-        email_pro: newPharma.email_pro,
-        mot_de_passe: newPharma.mot_de_passe,
-        plan: 'free',
-        is_online: false,
-        is_active: false,
-        is_pending: true,
-        statut: 'pending',
-        created_at: now,
-        updated_at: now,
-      });
-
-      // Table miroir pharmacies_pending
-      await client
-        .from('pharmacies_pending')
-        .upsert({
+      // 1. INSERT dans public.pharmacies
+      const { error: pharmaErr } = await client.from('pharmacies').insert([
+        {
           id,
-          nom: entry.nom,
-          quartier: entry.quartier,
-          adresse: entry.adresse,
-          phone: entry.phone,
-          titulaire: entry.titulaire,
-          lat: entry.lat,
-          lng: entry.lng,
-          photo_url: entry.photo_url || null,
+          nom: newPharma.nom,
+          tel: newPharma.tel,
+          phone: newPharma.tel,
+          lat: newPharma.lat,
+          lng: newPharma.lng,
+          adresse: newPharma.adresse,
+          quartier: newPharma.quartier,
+          titulaire: newPharma.titulaire,
+          numero_ordre: newPharma.numero_ordre || 'EN-ATTENTE',
+          piece_url: newPharma.piece_url || null,
+          photo_url: newPharma.photo_url || null,
+          email_pro: newPharma.email_pro || null,
+          mot_de_passe: newPharma.mot_de_passe || null,
+          plan: 'free',
+          is_online: false,
+          is_active: false,
+          is_pending: true,
           statut: 'pending',
           created_at: now,
-        })
-        .then(
-          () => {},
-          () => {}
+          updated_at: now,
+        },
+      ]);
+      if (pharmaErr) {
+        console.warn('[EFA GARDE] INSERT pharmacies:', pharmaErr.message);
+      }
+
+      // 2. INSERT dans public.pharmacies_pending
+      const { error: pendingErr } = await client
+        .from('pharmacies_pending')
+        .insert([
+          {
+            id,
+            nom: entry.nom,
+            quartier: entry.quartier || 'Lomé',
+            adresse: entry.adresse || '',
+            phone: entry.phone,
+            titulaire: entry.titulaire || 'Titulaire Officine',
+            numero_ordre: entry.numero_ordre || 'EN-ATTENTE',
+            piece_url: entry.piece_url || null,
+            photo_url: entry.photo_url || null,
+            email_pro: entry.email_pro || null,
+            mot_de_passe: entry.mot_de_passe || null,
+            lat: entry.lat || 6.1319,
+            lng: entry.lng || 1.2228,
+            statut: 'pending',
+            status: 'pending',
+            created_at: now,
+            submitted_at: now,
+          },
+        ]);
+      if (pendingErr) {
+        console.warn(
+          '[EFA GARDE] INSERT pharmacies_pending:',
+          pendingErr.message
         );
+      }
+
+      // 3. INSERT dans public.pre_inscriptions
+      const { error: preErr } = await client.from('pre_inscriptions').insert([
+        {
+          id: 'pre-' + id,
+          nom_pharmacie: entry.nom,
+          telephone: entry.phone,
+          email: entry.email_pro || null,
+          quartier: entry.quartier || 'Lomé',
+          adresse: entry.adresse || '',
+          titulaire: entry.titulaire || 'Titulaire Officine',
+          numero_ordre: entry.numero_ordre || null,
+          montant: 25000,
+          statut: 'formulaire_soumis',
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
+      if (preErr) {
+        console.warn('[EFA GARDE] INSERT pre_inscriptions:', preErr.message);
+      }
+
+      // 4. INSERT dans public.utilisateurs & public.users
+      await registerUserInDB({
+        email: entry.email_pro || null,
+        nom: entry.titulaire || entry.nom,
+        role: 'pharma',
+        telephone: entry.phone,
+        pharmacie_id: id,
+      });
     }
   } catch (err) {
     console.warn('[EFA GARDE] addPendingPharmacy Supabase warning:', err);
@@ -538,7 +647,7 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
   try {
     const client = getSupabaseClient();
     if (client) {
-      await client
+      const { error: pharmaErr } = await client
         .from('pharmacies')
         .update({
           statut: 'approved',
@@ -547,15 +656,17 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
           updated_at: now,
         })
         .eq('id', id);
+      if (pharmaErr) {
+        console.warn('[EFA] approvePharmacySuperAdmin pharmacies:', pharmaErr.message);
+      }
 
-      await client
+      const { error: pendErr } = await client
         .from('pharmacies_pending')
-        .update({ statut: 'approved' })
-        .eq('id', id)
-        .then(
-          () => {},
-          () => {}
-        );
+        .update({ statut: 'approved', status: 'approved', reviewed_at: now })
+        .eq('id', id);
+      if (pendErr) {
+        console.warn('[EFA] approvePharmacySuperAdmin pending:', pendErr.message);
+      }
     }
   } catch (err) {
     console.warn('[EFA] approvePharmacySuperAdmin Supabase warning:', err);
@@ -579,7 +690,7 @@ export async function rejectPharmacySuperAdmin(id: string): Promise<boolean> {
   try {
     const client = getSupabaseClient();
     if (client) {
-      await client
+      const { error: pharmaErr } = await client
         .from('pharmacies')
         .update({
           statut: 'rejected',
@@ -588,15 +699,17 @@ export async function rejectPharmacySuperAdmin(id: string): Promise<boolean> {
           updated_at: now,
         })
         .eq('id', id);
+      if (pharmaErr) {
+        console.warn('[EFA] rejectPharmacySuperAdmin pharmacies:', pharmaErr.message);
+      }
 
-      await client
+      const { error: pendErr } = await client
         .from('pharmacies_pending')
-        .update({ statut: 'rejected' })
-        .eq('id', id)
-        .then(
-          () => {},
-          () => {}
-        );
+        .update({ statut: 'rejected', status: 'rejected', reviewed_at: now })
+        .eq('id', id);
+      if (pendErr) {
+        console.warn('[EFA] rejectPharmacySuperAdmin pending:', pendErr.message);
+      }
     }
   } catch (err) {
     console.warn('[EFA] rejectPharmacySuperAdmin warning:', err);
@@ -744,30 +857,48 @@ export async function activateSubscriptionInDB(
 
       const currentPharma = memoryPharmacies.find((p) => p.id === pharmacyId);
       const pharmaNom = updates.nom || currentPharma?.nom || 'Pharmacie';
-      await client
+      const abnPayload = {
+        id: crypto.randomUUID(),
+        entreprise_id: pharmacyId,
+        pharmacie_id: pharmacyId,
+        nom_pharmacie: pharmaNom,
+        telephone: currentPharma?.tel || null,
+        email: currentPharma?.email_pro || null,
+        plan: updates.plan || 'populaire_mensuel',
+        statut: 'actif',
+        montant: updates.prix || 15000,
+        date_debut: now.toISOString(),
+        expire_le: end.toISOString(),
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      };
+      const { error: abnInsertErr } = await client
         .from('abonnements')
-        .upsert(
-          {
-            entreprise_id: pharmacyId,
-            pharmacie_id: pharmacyId,
-            nom_pharmacie: pharmaNom,
-            telephone: currentPharma?.tel || undefined,
-            email: currentPharma?.email_pro || undefined,
-            plan: updates.plan || 'populaire_mensuel',
-            statut: 'actif',
-            montant: updates.prix || 15000,
-            date_debut: now.toISOString(),
-            expire_le: end.toISOString(),
-            updated_at: now.toISOString(),
-          },
-          { onConflict: 'entreprise_id' }
-        )
-        .then(
-          () => {},
-          (err) => {
-            console.warn('[EFA GARDE] Upsert abonnements error:', err);
-          }
-        );
+        .insert([abnPayload]);
+      if (abnInsertErr) {
+        if (
+          abnInsertErr.code === '23505' ||
+          abnInsertErr.message?.includes('duplicate')
+        ) {
+          await client
+            .from('abonnements')
+            .update({
+              pharmacie_id: pharmacyId,
+              nom_pharmacie: pharmaNom,
+              telephone: currentPharma?.tel || null,
+              email: currentPharma?.email_pro || null,
+              plan: updates.plan || 'populaire_mensuel',
+              statut: 'actif',
+              montant: updates.prix || 15000,
+              date_debut: now.toISOString(),
+              expire_le: end.toISOString(),
+              updated_at: now.toISOString(),
+            })
+            .eq('entreprise_id', pharmacyId);
+        } else {
+          console.warn('[EFA GARDE] INSERT abonnements:', abnInsertErr.message);
+        }
+      }
     }
   } catch (err) {
     console.warn('[EFA GARDE] Failed to update DB:', err);
@@ -896,31 +1027,47 @@ export async function registerClientInDB(data: {
   memoryClients.unshift(clientObj);
   memoryClientsCount += 1;
 
-  // Enregistrement direct dans Supabase table clients
+  // Enregistrement direct dans Supabase (modèle exact user_consents)
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      await sb.from('clients').upsert({
-        id: clientObj.id,
-        nom: clientObj.nom,
-        numero: clientObj.numero_whatsapp,
-        numero_whatsapp: clientObj.numero_whatsapp,
-        date_inscription: clientObj.date_inscription,
-        created_at: clientObj.date_inscription,
-        updated_at: clientObj.date_inscription,
-      });
-
-      await sb
-        .from('utilisateurs')
-        .upsert({
+      const { error: clientErr } = await sb.from('clients').insert([
+        {
+          id: clientObj.id,
           nom: clientObj.nom,
-          role: 'client',
-          telephone: clientObj.numero_whatsapp,
-        })
-        .then(
-          () => {},
-          () => {}
-        );
+          numero: clientObj.numero_whatsapp,
+          numero_whatsapp: clientObj.numero_whatsapp,
+          date_inscription: clientObj.date_inscription,
+          created_at: clientObj.date_inscription,
+          updated_at: clientObj.date_inscription,
+        },
+      ]);
+
+      if (clientErr) {
+        if (
+          clientErr.code === '23505' ||
+          clientErr.message?.includes('duplicate')
+        ) {
+          await sb
+            .from('clients')
+            .update({
+              nom: clientObj.nom,
+              numero: clientObj.numero_whatsapp,
+              numero_whatsapp: clientObj.numero_whatsapp,
+              updated_at: clientObj.date_inscription,
+            })
+            .eq('id', clientObj.id);
+        } else {
+          console.warn('[EFA GARDE] INSERT clients:', clientErr.message);
+        }
+      }
+
+      // INSERT direct dans public.utilisateurs et public.users
+      await registerUserInDB({
+        nom: clientObj.nom,
+        role: 'client',
+        telephone: clientObj.numero_whatsapp,
+      });
     }
   } catch (err) {
     console.warn('[EFA] registerClientInDB Supabase warning:', err);
@@ -1042,17 +1189,39 @@ export async function createSubscriptionPaymentRequest(data: {
   );
   memoryDemandesAbonnement.unshift(demande);
 
-  // Synchronisation Supabase table abonnements
+  // Synchronisation Supabase directe (modèle exact user_consents)
   try {
     const sb = getSupabaseClient();
     if (sb) {
+      // 1. INSERT dans public.pre_inscriptions
+      const { error: preErr } = await sb.from('pre_inscriptions').insert([
+        {
+          id: demande.id,
+          nom_pharmacie: demande.nom_pharmacie,
+          telephone: demande.telephone,
+          email: demande.email || null,
+          montant: demande.montant,
+          statut: 'en_attente',
+          created_at: demande.created_at,
+          updated_at: demande.created_at,
+        },
+      ]);
+      if (preErr) {
+        console.warn('[EFA GARDE] INSERT pre_inscriptions:', preErr.message);
+      }
+
+      // 2. INSERT dans public.abonnements (pharmacie_id: null tant que la pharmacie n'est pas encore créée)
       const entrepriseId =
-        'sub-' + cleanNom.toLowerCase().replace(/[^a-z0-9]/g, '-');
-      await sb.from('abonnements').upsert(
+        'sub-' + cleanNom.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + cleanPhone;
+      const expireLe = new Date(
+        Date.now() + 30 * 24 * 3600 * 1000
+      ).toISOString();
+
+      const { error: abnErr } = await sb.from('abonnements').insert([
         {
           id: demande.id,
           entreprise_id: entrepriseId,
-          pharmacie_id: entrepriseId,
+          pharmacie_id: null,
           nom_pharmacie: demande.nom_pharmacie,
           telephone: demande.telephone,
           email: demande.email || null,
@@ -1061,10 +1230,32 @@ export async function createSubscriptionPaymentRequest(data: {
           statut: 'en_attente',
           created_at: demande.created_at,
           updated_at: demande.created_at,
-          expire_le: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+          expire_le: expireLe,
         },
-        { onConflict: 'entreprise_id' }
-      );
+      ]);
+
+      if (abnErr) {
+        if (
+          abnErr.code === '23505' ||
+          abnErr.message?.includes('duplicate')
+        ) {
+          await sb
+            .from('abonnements')
+            .update({
+              nom_pharmacie: demande.nom_pharmacie,
+              telephone: demande.telephone,
+              email: demande.email || null,
+              montant: demande.montant,
+              plan: demande.plan,
+              statut: 'en_attente',
+              updated_at: demande.created_at,
+              expire_le: expireLe,
+            })
+            .eq('entreprise_id', entrepriseId);
+        } else {
+          console.warn('[EFA GARDE] INSERT abonnements:', abnErr.message);
+        }
+      }
     }
   } catch (err) {
     console.warn(
@@ -1316,6 +1507,50 @@ export async function fetchConversations(
   return loadConversations(pharmacieId, clientId);
 }
 
+const inFlightConversationInserts = new Map<string, Promise<void>>();
+
+async function ensureConversationInDB(conv: Conversation): Promise<void> {
+  const existingPromise = inFlightConversationInserts.get(conv.id);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const p = (async () => {
+    try {
+      const sb = getSupabaseClient();
+      if (!sb) return;
+      const { error } = await sb.from('conversations').insert([
+        {
+          id: conv.id,
+          client_id: conv.client_id,
+          pharmacy_id: conv.pharmacy_id,
+          pharmacy_user_id: conv.pharmacy_user_id || conv.pharmacy_id,
+          last_message: conv.last_message || '',
+          last_message_at: conv.last_message_at || conv.created_at,
+          unread_count_pharmacy: conv.unread_count_pharmacy || 0,
+          unread_count_client: conv.unread_count_client || 0,
+          is_blocked: Boolean(conv.is_blocked),
+          is_reported: Boolean(conv.is_reported),
+          created_at: conv.created_at,
+          updated_at: conv.updated_at,
+        },
+      ]);
+      if (
+        error &&
+        error.code !== '23505' &&
+        !error.message?.includes('duplicate')
+      ) {
+        console.warn('[EFA GARDE] INSERT conversations:', error.message);
+      }
+    } catch (err) {
+      console.warn('[EFA GARDE] ensureConversationInDB warning:', err);
+    }
+  })();
+
+  inFlightConversationInserts.set(conv.id, p);
+  return p;
+}
+
 export function getOrCreateConversation(
   clientId: string,
   pharmacieId: string,
@@ -1332,6 +1567,7 @@ export function getOrCreateConversation(
       existing.pharmacy_user_id = pharmacyUserId;
       notifyChange();
     }
+    void ensureConversationInDB(existing);
     return existing;
   }
 
@@ -1353,31 +1589,8 @@ export function getOrCreateConversation(
 
   memoryConversations.unshift(newConv);
 
-  // Sync Supabase conversations
-  try {
-    const sb = getSupabaseClient();
-    if (sb) {
-      sb.from('conversations')
-        .upsert({
-          id: newConv.id,
-          client_id: newConv.client_id,
-          pharmacy_id: newConv.pharmacy_id,
-          pharmacy_user_id: newConv.pharmacy_user_id,
-          last_message: '',
-          last_message_at: now,
-          unread_count_pharmacy: 0,
-          unread_count_client: 0,
-          is_blocked: false,
-          is_reported: false,
-          created_at: now,
-          updated_at: now,
-        })
-        .then(
-          () => {},
-          () => {}
-        );
-    }
-  } catch {}
+  // INSERT direct dans public.conversations (modèle exact user_consents)
+  void ensureConversationInDB(newConv);
 
   notifyChange();
   return newConv;
@@ -1519,12 +1732,23 @@ export function addMessage(
     } catch {}
   }
 
-  // 4. Synchronisation Supabase table messages + conversations
-  try {
-    const sb = getSupabaseClient();
-    if (sb) {
-      sb.from('messages')
-        .insert({
+  // 4. Synchronisation Supabase : attendre que `conversations` existe avant INSERT `messages`
+  void (async () => {
+    try {
+      const sb = getSupabaseClient();
+      if (!sb) return;
+
+      if (conv) {
+        await ensureConversationInDB(conv);
+      } else {
+        const pendingInsert = inFlightConversationInserts.get(conversationId);
+        if (pendingInsert) {
+          await pendingInsert;
+        }
+      }
+
+      const { error: msgErr } = await sb.from('messages').insert([
+        {
           id: newMsg.id,
           conversation_id: newMsg.conversation_id,
           sender_id: newMsg.sender_id,
@@ -1534,19 +1758,20 @@ export function addMessage(
           content: newMsg.content,
           text: newMsg.text,
           type: newMsg.type,
-          media_url: newMsg.media_url,
-          audio_duration: newMsg.audio_duration,
+          media_url: newMsg.media_url || null,
+          audio_duration: newMsg.audio_duration || null,
           is_read: false,
           created_at: newMsg.created_at,
           expires_at: newMsg.expires_at,
-        })
-        .then(
-          () => {},
-          () => {}
-        );
+        },
+      ]);
+      if (msgErr) {
+        console.warn('[EFA GARDE] INSERT messages:', msgErr.message);
+      }
 
       if (conv) {
-        sb.from('conversations')
+        const { error: convUpdateErr } = await sb
+          .from('conversations')
           .update({
             last_message: conv.last_message,
             last_message_at: conv.last_message_at,
@@ -1554,14 +1779,15 @@ export function addMessage(
             unread_count_client: conv.unread_count_client,
             updated_at: conv.updated_at,
           })
-          .eq('id', conversationId)
-          .then(
-            () => {},
-            () => {}
-          );
+          .eq('id', conversationId);
+        if (convUpdateErr) {
+          console.warn('[EFA GARDE] UPDATE conversations:', convUpdateErr.message);
+        }
       }
+    } catch (err) {
+      console.warn('[EFA GARDE] addMessage Supabase warning:', err);
     }
-  } catch {}
+  })();
 
   notifyChange();
   return newMsg;
@@ -2270,7 +2496,29 @@ export function initSupabaseRealtime(): void {
       )
       .on(
         'postgres_changes',
+        { event: '*', schema: 'public', table: 'pharmacies_pending' },
+        () => {
+          fetchPendingPharmacies().catch(() => {});
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pre_inscriptions' },
+        () => {
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
         { event: '*', schema: 'public', table: 'utilisateurs' },
+        () => {
+          notifyChange();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'users' },
         () => {
           notifyChange();
         }

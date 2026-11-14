@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { Pharmacie } from '../types';
-import { loadPharmacies, updatePharmacySuperAdmin } from '../services/store';
+import {
+  loadPharmacies,
+  updatePharmacySuperAdmin,
+  registerUserInDB,
+} from '../services/store';
 import { setSession } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import { checkRateLimit, sanitizeInput } from '../utils/security';
@@ -156,6 +160,15 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
           createdAt: new Date().toISOString(),
         });
 
+        void registerUserInDB({
+          auth_user_id: signInData.user?.id || null,
+          email: cleanEmail,
+          nom: assignedPharma.titulaire || assignedPharma.nom || cleanEmail,
+          role: 'pharma',
+          telephone: assignedPharma.tel || null,
+          pharmacie_id: assignedPharma.id,
+        });
+
         setLoading(false);
         onSuccess(assignedPharma.id);
         return;
@@ -196,7 +209,16 @@ export const PharmacienLoginPage: React.FC<PharmacienLoginPageProps> = ({
         return;
       }
 
-      // 3. Affichage du message de confirmation requis
+      // 3. Enregistrement dans public.utilisateurs & public.users + affichage confirmation
+      void registerUserInDB({
+        auth_user_id: signUpData?.user?.id || null,
+        email: cleanEmail,
+        nom: matchedPharma?.titulaire || matchedPharma?.nom || cleanEmail,
+        role: 'pharma',
+        telephone: matchedPharma?.tel || null,
+        pharmacie_id: matchedPharma?.id || null,
+      });
+
       setIsCheckEmail(true);
       setLoading(false);
     } catch (err: unknown) {
