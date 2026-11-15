@@ -1080,8 +1080,11 @@ export function saveClients(clients: Client[]): void {
 }
 
 /**
- * INSCRIPTION CLIENT :
- * INSERT INTO public.clients (nom, numero, numero_whatsapp)
+ * INSCRIPTION / RECONNEXION CLIENT :
+ * 1) Cherche d'abord dans public.clients WHERE telephone = numero
+ * 2) Si existe -> reconnecte-le (pas de doublon)
+ * 3) Sinon -> INSERT INTO public.clients (nom, telephone)
+ * 4) Sauvegarde client_id dans localStorage
  */
 export async function registerClientInDB(data: {
   nom: string;
@@ -1090,72 +1093,163 @@ export async function registerClientInDB(data: {
   const cleanNom = data.nom.trim();
   const cleanPhone = data.numero_whatsapp.trim().replace(/\s+/g, '');
   const now = new Date().toISOString();
-  const clientId =
-    localStorage.getItem('efa_client_id') ||
+  const fallbackId =
     'cli-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
 
-  const clientObj: Client = {
-    id: clientId,
-    nom: cleanNom,
-    numero_whatsapp: cleanPhone,
-    date_inscription: now,
-  };
+  let clientId = fallbackId;
+  let finalNom = cleanNom;
+  let finalPhone = cleanPhone;
+  let finalDate = now;
+  let isNewClient = false;
 
-  // Session persistante client strictement (nom + numero)
-  localStorage.setItem('efa_client_id', clientId);
-  localStorage.setItem('efa_client_nom', cleanNom);
-  localStorage.setItem('efa_client_whatsapp', cleanPhone);
-
-  memoryClients = memoryClients.filter(
-    (c) => c.numero_whatsapp !== cleanPhone && c.id !== clientId
-  );
-  memoryClients.unshift(clientObj);
-  memoryClientsCount += 1;
-
-  // Enregistrement direct dans Supabase (modèle exact user_consents)
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      const { error: clientErr } = await sb.from('clients').insert([
-        {
-          id: clientObj.id,
-          nom: clientObj.nom,
-          numero: clientObj.numero_whatsapp,
-          numero_whatsapp: clientObj.numero_whatsapp,
-          date_inscription: clientObj.date_inscription,
-          created_at: clientObj.date_inscription,
-          updated_at: clientObj.date_inscription,
-        },
-      ]);
+      let existingClient: any = null;
 
-      if (clientErr) {
-        if (
-          clientErr.code === '23505' ||
-          clientErr.message?.includes('duplicate')
-        ) {
-          await sb
-            .from('clients')
-            .update({
-              nom: clientObj.nom,
-              numero: clientObj.numero_whatsapp,
-              numero_whatsapp: clientObj.numero_whatsapp,
-              updated_at: clientObj.date_inscription,
-            })
-            .eq('id', clientObj.id);
-        } else {
-          console.warn('[EFA GARDE] INSERT clients:', clientErr.message);
+      // 1. Cherche d'abord dans clients WHERE telephone = numero
+      const { data: byTel, error: byTelErr } = await sb
+        .from('clients')
+        .select('*')
+        .eq('telephone', cleanPhone)
+        .limit(1)
+        .maybeSingle();
+
+      if (!byTelErr && byTel) {
+        existingClient = byTel;
+      } else {
+        // Fallback compatibilité si anciennes lignes enregistrées sous numero / numero_whatsapp
+        const { data: byAlt } = await sb
+          .from('clients')
+          .select('*')
+          .or(`numero.eq.${cleanPhone},numero_whatsapp.eq.${cleanPhone}`)
+          .limit(1)
+          .maybeSingle();
+        if (byAlt) {
+          existingClient = byAlt;
         }
       }
 
-      // INSERT direct dans public.utilisateurs et public.users
-      await registerUserInDB({
-        nom: clientObj.nom,
-        role: 'client',
-        telephone: clientObj.numero_whatsapp,
-      });
+      if (existingClient) {
+        // 2. Client déjà existant -> Reconnexion sans doublon
+        clientId = String(existingClient.id);
+        finalNom = existingClient.nom || cleanNom;
+        finalPhone =
+          existingClient.telephone ||
+          existingClient.numero_whatsapp ||
+          existingClient.numero ||
+          cleanPhone;
+        finalDate =
+          existingClient.date_inscription || existingClient.created_at || now;
+      } else {
+        // 3. Nouveau client -> INSERT INTO clients (nom, telephone)
+        const { data: insertedRow, error: insertErr } = await sb
+          .from('clients')
+          .insert([{ nom: cleanNom, telephone: cleanPhone }])
+          .select()
+          .maybeSingle();
+
+        if (!insertErr && insertedRow) {
+          clientId = String(insertedRow.id);
+          finalNom = insertedRow.nom || cleanNom;
+          finalPhone =
+            insertedRow.telephone ||
+            insertedRow.numero_whatsapp ||
+            insertedRow.numero ||
+            cleanPhone;
+          finalDate =
+            insertedRow.date_inscription || insertedRow.created_at || now;
+          isNewClient = true;
+        } else if (
+          insertErr &&
+          (insertErr.code === '23505' ||
+            insertErr.message?.toLowerCase().includes('duplicate'))
+        ) {
+          // Concurrence / unicité -> récupère la ligne existante sans doublon
+          const { data: existingAfterRace } = await sb
+            .from('clients')
+            .select('*')
+            .eq('telephone', cleanPhone)
+            .limit(1)
+            .maybeSingle();
+          if (existingAfterRace) {
+            clientId = String(existingAfterRace.id);
+            finalNom = existingAfterRace.nom || cleanNom;
+            finalPhone =
+              existingAfterRace.telephone ||
+              existingAfterRace.numero_whatsapp ||
+              existingAfterRace.numero ||
+              cleanPhone;
+            finalDate =
+              existingAfterRace.date_inscription ||
+              existingAfterRace.created_at ||
+              now;
+          }
+        } else if (insertErr) {
+          // Fallback schéma legacy (si id sans default ou colonne telephone absente)
+          const legacyPayload: Record<string, any> = {
+            id: fallbackId,
+            nom: cleanNom,
+            numero: cleanPhone,
+            numero_whatsapp: cleanPhone,
+            date_inscription: now,
+            created_at: now,
+            updated_at: now,
+          };
+          if (!insertErr.message?.toLowerCase().includes('telephone')) {
+            legacyPayload.telephone = cleanPhone;
+          }
+          const { data: legacyInserted, error: legacyErr } = await sb
+            .from('clients')
+            .insert([legacyPayload])
+            .select()
+            .maybeSingle();
+
+          if (!legacyErr && legacyInserted) {
+            clientId = String(legacyInserted.id);
+            isNewClient = true;
+          } else if (legacyErr) {
+            console.warn('[EFA GARDE] INSERT clients:', legacyErr.message);
+          }
+        }
+
+        if (isNewClient) {
+          await registerUserInDB({
+            nom: finalNom,
+            role: 'client',
+            telephone: finalPhone,
+          });
+        }
+      }
     }
   } catch (err) {
     console.warn('[EFA] registerClientInDB Supabase warning:', err);
+  }
+
+  const clientObj: Client = {
+    id: clientId,
+    nom: finalNom,
+    telephone: finalPhone,
+    numero: finalPhone,
+    numero_whatsapp: finalPhone,
+    date_inscription: finalDate,
+  };
+
+  // 4. Sauvegarde client_id + profil dans localStorage
+  localStorage.setItem('client_id', clientId);
+  localStorage.setItem('efa_client_id', clientId);
+  localStorage.setItem('efa_client_nom', finalNom);
+  localStorage.setItem('efa_client_whatsapp', finalPhone);
+
+  memoryClients = memoryClients.filter(
+    (c) =>
+      c.id !== clientId &&
+      c.telephone !== finalPhone &&
+      c.numero_whatsapp !== finalPhone
+  );
+  memoryClients.unshift(clientObj);
+  if (isNewClient) {
+    memoryClientsCount += 1;
   }
 
   notifyChange();
@@ -1183,11 +1277,13 @@ export async function fetchClientsCount(): Promise<number> {
 
 export function getOrCreateClientId(): string {
   if (typeof window === 'undefined') return 'client-guest-1';
-  let cid = localStorage.getItem('efa_client_id');
+  let cid =
+    localStorage.getItem('client_id') || localStorage.getItem('efa_client_id');
   if (!cid) {
     cid = 'client-' + Math.random().toString(36).substring(2, 9);
-    localStorage.setItem('efa_client_id', cid);
   }
+  localStorage.setItem('client_id', cid);
+  localStorage.setItem('efa_client_id', cid);
   return cid;
 }
 

@@ -34,25 +34,27 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
     setLoading(true);
 
     try {
-      // 1. Enregistrement direct dans Supabase table `clients`
+      // 1. Recherche dans table `clients` (WHERE telephone = numero) -> reconnecte si existe, sinon INSERT (nom, telephone)
       const registered = await registerClientInDB({
         nom: cleanNom,
         numero_whatsapp: cleanPhone,
       });
 
-      // 2. Session persistante pour que la prochaine ouverture = entrée directe sans re-saisir
+      // 2. Session persistante avec sauvegarde de client_id dans localStorage
       setSession({
         role: 'client',
-        phone: cleanPhone,
-        pharmacieNom: cleanNom,
+        phone: registered.numero_whatsapp,
+        pharmacieNom: registered.nom,
         createdAt: new Date().toISOString(),
       });
       localStorage.setItem('role', 'client');
       localStorage.setItem('efa_garde_role', 'client');
+      localStorage.setItem('client_id', registered.id);
       localStorage.setItem('efa_client_id', registered.id);
       localStorage.setItem('efa_client_nom', registered.nom);
       localStorage.setItem('efa_client_whatsapp', registered.numero_whatsapp);
 
+      setNom(registered.nom);
       setLoading(false);
       setStep('welcome');
 
@@ -61,6 +63,12 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
       }, 700);
     } catch (err) {
       console.warn('Erreur inscription client:', err);
+      const fallbackId =
+        localStorage.getItem('client_id') ||
+        localStorage.getItem('efa_client_id') ||
+        'cli-' + Date.now();
+      localStorage.setItem('client_id', fallbackId);
+      localStorage.setItem('efa_client_id', fallbackId);
       // Fallback local persistant garanti
       setSession({
         role: 'client',

@@ -239,6 +239,7 @@ CREATE POLICY "Abonnements all policy" ON public.abonnements
 CREATE TABLE IF NOT EXISTS public.clients (
   id TEXT PRIMARY KEY DEFAULT ('cli-' || floor(extract(epoch from now()))::text || '-' || substr(md5(random()::text), 1, 6)),
   nom TEXT NOT NULL,
+  telephone TEXT,
   numero TEXT,
   numero_whatsapp TEXT,
   date_inscription TIMESTAMPTZ DEFAULT NOW(),
@@ -247,11 +248,14 @@ CREATE TABLE IF NOT EXISTS public.clients (
 );
 
 ALTER TABLE public.clients
+  ADD COLUMN IF NOT EXISTS telephone TEXT,
   ADD COLUMN IF NOT EXISTS numero TEXT,
   ADD COLUMN IF NOT EXISTS numero_whatsapp TEXT,
   ADD COLUMN IF NOT EXISTS date_inscription TIMESTAMPTZ DEFAULT NOW(),
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_clients_telephone ON public.clients (telephone);
 
 DO $$
 BEGIN

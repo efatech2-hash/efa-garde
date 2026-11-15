@@ -149,6 +149,7 @@ export interface PharmacyDailyStat {
 export interface Client {
   id: string;
   nom: string;
+  telephone?: string;
   numero?: string;
   numero_whatsapp: string;
   date_inscription: string;
