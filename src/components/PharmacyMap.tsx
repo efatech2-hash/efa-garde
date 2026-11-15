@@ -86,7 +86,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
       }
 
       // Règles visuelles
-      const isPending = p.is_pending || p.statut === 'pending';
+      const isPending = Boolean(p.is_pending);
       const isPopulaire = !isPending && Boolean(
         p.is_premium ||
           p.etoile_doree ||

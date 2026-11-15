@@ -202,7 +202,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   const refreshPending = async () => {
     try {
       const p = await fetchPendingPharmacies();
-      setPendingPharmacies(p.filter((item) => item.statut === 'pending'));
+      setPendingPharmacies(p.filter((item) => item.status === 'pending'));
     } catch {
       setPendingPharmacies(loadPendingPharmacies());
     }
@@ -380,12 +380,12 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     showToast(`💼 "${p.nom}" activée pour 1 an STANDARD (90.000F) en DB !`);
   };
 
-  // 4. Action: Activer enregistrement (25.000F) => is_registered=true, is_active=true
+  // 4. Action: Activer enregistrement (25.000F) => is_registered=true, is_active=true, is_verified=true
   const handleActivateRegistration = async (p: Pharmacie) => {
     const updates: Partial<Pharmacie> = {
       is_registered: true,
       is_active: true,
-      statut: 'approved',
+      is_verified: true,
       prix: 25000,
     };
 
@@ -1215,7 +1215,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                 <tbody className="divide-y divide-slate-800/80 text-xs text-slate-200">
                   {filteredPharmacies.map((p) => {
                     const isActive = p.is_active !== false;
-                    const isRegistered = p.is_registered === true || p.statut === 'approved';
+                    const isRegistered = p.is_registered === true || p.is_verified === true || p.is_active === true;
 
                     return (
                       <tr

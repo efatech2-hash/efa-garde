@@ -301,11 +301,49 @@ export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
 }
 
 /* =========================================================
-   PHARMACIES : 100% SUPABASE TABLE `pharmacies`
-   - Carte publique : SELECT WHERE statut='approved' AND is_active=true
-   - Formulaire pharmacie : INSERT (statut='pending', is_active=false)
-   - Valider et Publier : UPDATE statut='approved', is_active=true
+   PHARMACIES : 100% SUPABASE TABLE `pharmacies` & VUE `view_pharmacies_garde`
+   - Carte publique : SELECT * FROM view_pharmacies_garde (is_active=true)
+   - Garde gérée par is_garde uniquement
+   - pharmacies_pending unifiée sur `status` + `id` UUID
    ========================================================= */
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidUuid(val: unknown): val is string {
+  return typeof val === 'string' && UUID_REGEX.test(val.trim());
+}
+
+function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function normalizePharmacyRow(p: any): Pharmacie {
+  const isGarde = Boolean(p.is_garde ?? p.is_online);
+  const phone = String(p.phone || p.tel || '');
+  return {
+    ...p,
+    tel: phone,
+    phone,
+    adresse: p.adresse || '',
+    quartier: p.quartier || 'Lomé',
+    lat: Number(p.lat) || 6.1319,
+    lng: Number(p.lng) || 1.2228,
+    plan: p.plan || 'free',
+    is_garde: isGarde,
+    is_online: isGarde,
+    is_verified: Boolean(p.is_verified),
+    is_active: p.is_active !== false,
+    is_pending: Boolean(p.is_pending),
+  };
+}
 
 export function loadPharmacies(): Pharmacie[] {
   return sortPharmaciesPriority(
@@ -333,13 +371,12 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
     if (client) {
       const { data, error } = await client
         .from('pharmacies')
-        .select('*')
-        .order('is_premium', { ascending: false })
-        .order('position', { ascending: true })
-        .order('etoile_doree', { ascending: false });
+        .select('*');
 
       if (!error && data && Array.isArray(data)) {
-        const clean = (data as Pharmacie[]).filter((p) => !isDemoPharmacy(p));
+        const clean = data
+          .map(normalizePharmacyRow)
+          .filter((p) => !isDemoPharmacy(p));
         const sorted = sortPharmaciesPriority(clean);
         memoryPharmacies = sorted;
         notifyChange();
@@ -353,31 +390,35 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
 }
 
 /**
- * CARTE PUBLIQUE : SELECT * FROM public.pharmacies WHERE statut='approved' AND is_active=true UNIQUEMENT
- * Ne retourne JAMAIS de pharmacies non validées ou refusées aux clients grand public.
+ * CARTE PUBLIQUE : SELECT * FROM public.view_pharmacies_garde (is_active=true)
+ * Ne bloque pas sur is_verified=true ni sur is_garde=true.
  */
 export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
   try {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client
-        .from('pharmacies')
-        .select('*')
-        .eq('statut', 'approved')
-        .eq('is_active', true)
-        .order('is_premium', { ascending: false })
-        .order('position', { ascending: true })
-        .order('etoile_doree', { ascending: false });
+      let { data, error } = await client
+        .from('view_pharmacies_garde')
+        .select('*');
+
+      if (error || !Array.isArray(data)) {
+        const fallbackRes = await client
+          .from('pharmacies')
+          .select('*')
+          .eq('is_active', true);
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
 
       if (!error && data && Array.isArray(data)) {
-        const clean = (data as Pharmacie[]).filter((p) => !isDemoPharmacy(p));
+        const clean = data
+          .map(normalizePharmacyRow)
+          .filter((p) => !isDemoPharmacy(p) && p.is_active !== false);
         const sorted = sortPharmaciesPriority(clean);
 
-        // Préserve les non-approuvées déjà en mémoire pour l'admin
-        const pendingOrOther = memoryPharmacies.filter(
-          (p) => p.statut !== 'approved' || !p.is_active
-        );
-        memoryPharmacies = sortPharmaciesPriority([...sorted, ...pendingOrOther]);
+        // Préserve les inactives déjà en mémoire pour l'admin
+        const inactiveOrOther = memoryPharmacies.filter((p) => p.is_active === false);
+        memoryPharmacies = sortPharmaciesPriority([...sorted, ...inactiveOrOther]);
         notifyChange();
         return sorted;
       }
@@ -392,7 +433,6 @@ export function loadApprovedPharmacies(): Pharmacie[] {
   return memoryPharmacies.filter((p) => {
     if (isDemoPharmacy(p)) return false;
     if (p.is_pending === true) return false;
-    if (p.statut !== 'approved') return false;
     if (p.is_active === false) return false;
     return true;
   });
@@ -403,10 +443,10 @@ export function loadAllPharmaciesWithPending(): Pharmacie[] {
 }
 
 /**
- * Super Admin : Liste des pharmacies en attente de vérification
+ * Super Admin : Liste des pharmacies en attente de vérification (`status = 'pending'`)
  */
 export function loadPendingPharmacies(): PharmaciePending[] {
-  return memoryPendingPharmacies.filter((p) => p.statut === 'pending');
+  return memoryPendingPharmacies.filter((p) => p.status === 'pending');
 }
 
 export function savePendingPharmacies(list: PharmaciePending[]) {
@@ -421,7 +461,7 @@ export async function fetchPendingPharmacies(): Promise<PharmaciePending[]> {
       const { data, error } = await client
         .from('pharmacies_pending')
         .select('*')
-        .eq('statut', 'pending')
+        .eq('status', 'pending')
         .order('created_at', { ascending: false });
 
       if (!error && data && Array.isArray(data)) {
@@ -439,7 +479,7 @@ export async function fetchPendingPharmacies(): Promise<PharmaciePending[]> {
           mot_de_passe: p.mot_de_passe,
           lat: p.lat || 6.1319,
           lng: p.lng || 1.2228,
-          statut: 'pending',
+          status: 'pending',
           created_at: p.created_at || new Date().toISOString(),
         }));
         memoryPendingPharmacies = list;
@@ -454,84 +494,28 @@ export async function fetchPendingPharmacies(): Promise<PharmaciePending[]> {
 
 /**
  * FORMULAIRE PHARMACIE :
- * INSERT INTO public.pharmacies (statut='pending', is_active=false, is_pending=true)
- * Reste 100% invisible sur la carte publique jusqu'à validation par le Super Admin.
+ * INSERT INTO public.pharmacies_pending (id uuid, status='pending') sans doublon dans pharmacies.
+ * Le transfert vers public.pharmacies se fait automatiquement lors de la validation Super Admin.
  */
 export async function addPendingPharmacy(
-  entry: Omit<PharmaciePending, 'id' | 'statut' | 'created_at'>
+  entry: Omit<PharmaciePending, 'id' | 'status' | 'created_at'>
 ): Promise<PharmaciePending> {
-  const id =
-    'pharma-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  const id = generateUuid();
   const now = new Date().toISOString();
 
   const newPending: PharmaciePending = {
     ...entry,
     id,
-    statut: 'pending',
+    status: 'pending',
     created_at: now,
-  };
-
-  const newPharma: Pharmacie = {
-    id,
-    nom: entry.nom,
-    tel: entry.phone,
-    lat: entry.lat || 6.1319,
-    lng: entry.lng || 1.2228,
-    adresse: entry.adresse,
-    quartier: entry.quartier || 'Lomé',
-    titulaire: entry.titulaire || 'Titulaire Officine',
-    numero_ordre: entry.numero_ordre,
-    piece_url: entry.piece_url,
-    photo_url: entry.photo_url || undefined,
-    email_pro: entry.email_pro,
-    mot_de_passe: entry.mot_de_passe,
-    plan: 'free',
-    is_online: false,
-    is_active: false,
-    is_pending: true,
-    statut: 'pending',
-    created_at: now,
-    updated_at: now,
   };
 
   memoryPendingPharmacies.unshift(newPending);
-  memoryPharmacies.unshift(newPharma);
 
-  // Synchronisation directe dans Supabase (modèle exact user_consents)
   try {
     const client = getSupabaseClient();
     if (client) {
-      // 1. INSERT dans public.pharmacies
-      const { error: pharmaErr } = await client.from('pharmacies').insert([
-        {
-          id,
-          nom: newPharma.nom,
-          tel: newPharma.tel,
-          phone: newPharma.tel,
-          lat: newPharma.lat,
-          lng: newPharma.lng,
-          adresse: newPharma.adresse,
-          quartier: newPharma.quartier,
-          titulaire: newPharma.titulaire,
-          numero_ordre: newPharma.numero_ordre || 'EN-ATTENTE',
-          piece_url: newPharma.piece_url || null,
-          photo_url: newPharma.photo_url || null,
-          email_pro: newPharma.email_pro || null,
-          mot_de_passe: newPharma.mot_de_passe || null,
-          plan: 'free',
-          is_online: false,
-          is_active: false,
-          is_pending: true,
-          statut: 'pending',
-          created_at: now,
-          updated_at: now,
-        },
-      ]);
-      if (pharmaErr) {
-        console.warn('[EFA GARDE] INSERT pharmacies:', pharmaErr.message);
-      }
-
-      // 2. INSERT dans public.pharmacies_pending
+      // 1. INSERT dans public.pharmacies_pending (id UUID, status='pending')
       const { error: pendingErr } = await client
         .from('pharmacies_pending')
         .insert([
@@ -549,7 +533,6 @@ export async function addPendingPharmacy(
             mot_de_passe: entry.mot_de_passe || null,
             lat: entry.lat || 6.1319,
             lng: entry.lng || 1.2228,
-            statut: 'pending',
             status: 'pending',
             created_at: now,
             submitted_at: now,
@@ -562,10 +545,10 @@ export async function addPendingPharmacy(
         );
       }
 
-      // 3. INSERT dans public.pre_inscriptions
+      // 2. INSERT dans public.pre_inscriptions
       const { error: preErr } = await client.from('pre_inscriptions').insert([
         {
-          id: 'pre-' + id,
+          id: generateUuid(),
           nom_pharmacie: entry.nom,
           telephone: entry.phone,
           email: entry.email_pro || null,
@@ -583,7 +566,7 @@ export async function addPendingPharmacy(
         console.warn('[EFA GARDE] INSERT pre_inscriptions:', preErr.message);
       }
 
-      // 4. INSERT dans public.utilisateurs & public.users
+      // 3. INSERT dans public.utilisateurs & public.users
       await registerUserInDB({
         email: entry.email_pro || null,
         nom: entry.titulaire || entry.nom,
@@ -602,9 +585,9 @@ export async function addPendingPharmacy(
 
 /**
  * VALIDER ET PUBLIER (Super Admin Dashboard) :
- * 1) UPDATE public.pharmacies_pending SET statut='valide', status='valide', reviewed_at=NOW() WHERE id=...
- * 2) INSERT INTO public.pharmacies (nom, phone, adresse, quartier, lat, lng, email_pro, is_active=true) depuis cette ligne
- *    Si phone existe déjà dans pharmacies -> UPDATE au lieu d'INSERT.
+ * 1) Transfère la ligne de public.pharmacies_pending vers public.pharmacies avec UUID (is_active=true, is_verified=true, is_garde=false)
+ *    Si phone existe déjà dans pharmacies -> UPDATE sans doublon.
+ * 2) Marque la ligne pending comme transférée (`status='transferred'`, `reviewed_at=NOW()`)
  */
 export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
   const now = new Date().toISOString();
@@ -622,25 +605,9 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
 
       const source: any = pendingRow || memPending || found;
       const rowPhone = String(source?.phone || source?.tel || '').trim();
+      const targetUuid = isValidUuid(id) ? id : generateUuid();
 
-      // 1) UPDATE pharmacies_pending SET statut='valide', status='valide', reviewed_at=NOW() WHERE id=...
-      const { error: pendErr } = await client
-        .from('pharmacies_pending')
-        .update({
-          statut: 'valide',
-          status: 'valide',
-          reviewed_at: now,
-        })
-        .eq('id', id);
-      if (pendErr) {
-        console.warn('[EFA] approvePharmacySuperAdmin pending:', pendErr.message);
-        await client
-          .from('pharmacies_pending')
-          .update({ statut: 'valide' })
-          .eq('id', id);
-      }
-
-      // 2) Vérifie si phone existe déjà dans pharmacies (UPDATE au lieu d'INSERT)
+      // 1) Vérifie si phone existe déjà dans pharmacies (UPDATE sans doublon)
       let existingPharmaId: string | null = null;
       if (rowPhone) {
         const { data: existingByPhone } = await client
@@ -651,19 +618,9 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
           .maybeSingle();
         if (existingByPhone?.id) {
           existingPharmaId = String(existingByPhone.id);
-        } else {
-          const { data: existingByTel } = await client
-            .from('pharmacies')
-            .select('id')
-            .eq('tel', rowPhone)
-            .limit(1)
-            .maybeSingle();
-          if (existingByTel?.id) {
-            existingPharmaId = String(existingByTel.id);
-          }
         }
       }
-      if (!existingPharmaId) {
+      if (!existingPharmaId && isValidUuid(id)) {
         const { data: existingById } = await client
           .from('pharmacies')
           .select('id')
@@ -675,62 +632,40 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
         }
       }
 
-      const pharmacyFields = {
+      const updateFields = {
         nom: source?.nom || 'Pharmacie',
-        tel: rowPhone,
         phone: rowPhone,
         adresse: source?.adresse || '',
         quartier: source?.quartier || 'Lomé',
         lat: source?.lat ?? 6.1319,
         lng: source?.lng ?? 1.2228,
-        titulaire: source?.titulaire || 'Titulaire Officine',
-        numero_ordre: source?.numero_ordre || 'VALIDE',
-        piece_url: source?.piece_url || null,
-        photo_url: source?.photo_url || null,
         email_pro: source?.email_pro || null,
-        mot_de_passe: source?.mot_de_passe || null,
         is_active: true,
-        is_pending: false,
-        statut: 'approved',
+        is_verified: true,
         updated_at: now,
       };
 
       if (existingPharmaId) {
         const { error: updateErr } = await client
           .from('pharmacies')
-          .update(pharmacyFields)
+          .update(updateFields)
           .eq('id', existingPharmaId);
         if (updateErr) {
           console.warn(
             '[EFA] approvePharmacySuperAdmin pharmacies update:',
             updateErr.message
           );
-          await client
-            .from('pharmacies')
-            .update({
-              nom: source?.nom || 'Pharmacie',
-              phone: rowPhone,
-              adresse: source?.adresse || '',
-              quartier: source?.quartier || 'Lomé',
-              lat: source?.lat ?? 6.1319,
-              lng: source?.lng ?? 1.2228,
-              email_pro: source?.email_pro || null,
-              is_active: true,
-            })
-            .eq('id', existingPharmaId);
         }
       } else {
+        const insertPayload = {
+          id: targetUuid,
+          ...updateFields,
+          is_garde: false,
+          created_at: source?.created_at || now,
+        };
         const { error: insertErr } = await client
           .from('pharmacies')
-          .insert([
-            {
-              id,
-              ...pharmacyFields,
-              plan: 'free',
-              is_online: false,
-              created_at: source?.created_at || now,
-            },
-          ]);
+          .insert([insertPayload]);
 
         if (insertErr) {
           if (
@@ -739,49 +674,47 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
           ) {
             await client
               .from('pharmacies')
-              .update(pharmacyFields)
-              .eq('id', id);
+              .update(updateFields)
+              .eq('id', targetUuid);
           } else {
             console.warn(
               '[EFA] approvePharmacySuperAdmin pharmacies insert:',
               insertErr.message
             );
-            // Retry minimal INSERT avec les colonnes essentielles (au cas où id UUID auto ou colonne absente)
-            const { error: minInsertErr } = await client
-              .from('pharmacies')
-              .insert([
-                {
-                  nom: source?.nom || 'Pharmacie',
-                  phone: rowPhone,
-                  adresse: source?.adresse || '',
-                  quartier: source?.quartier || 'Lomé',
-                  lat: source?.lat ?? 6.1319,
-                  lng: source?.lng ?? 1.2228,
-                  email_pro: source?.email_pro || null,
-                  is_active: true,
-                },
-              ]);
-            if (minInsertErr) {
-              console.warn(
-                '[EFA] approvePharmacySuperAdmin minimal insert:',
-                minInsertErr.message
-              );
-            }
           }
         }
       }
 
+      // 2) Marque la ligne pending comme transférée (colonne unique `status`)
+      const { error: pendErr } = await client
+        .from('pharmacies_pending')
+        .update({
+          status: 'transferred',
+          reviewed_at: now,
+        })
+        .eq('id', id);
+      if (pendErr) {
+        console.warn('[EFA] approvePharmacySuperAdmin pending:', pendErr.message);
+      }
+
       memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
-      if (found) {
-        found.statut = 'approved';
-        found.is_active = true;
-        found.is_pending = false;
-        found.updated_at = now;
+      const finalId = existingPharmaId || targetUuid;
+      const existingMemIdx = memoryPharmacies.findIndex(
+        (p) => p.id === finalId || (rowPhone && p.tel === rowPhone)
+      );
+      if (existingMemIdx >= 0) {
+        memoryPharmacies[existingMemIdx] = {
+          ...memoryPharmacies[existingMemIdx],
+          ...updateFields,
+          tel: rowPhone,
+          is_pending: false,
+        };
       } else if (source) {
         memoryPharmacies.unshift({
-          id: existingPharmaId || id,
+          id: finalId,
           nom: source.nom || 'Pharmacie',
           tel: rowPhone,
+          phone: rowPhone,
           adresse: source.adresse || '',
           quartier: source.quartier || 'Lomé',
           lat: source.lat ?? 6.1319,
@@ -794,9 +727,10 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
           mot_de_passe: source.mot_de_passe,
           plan: 'free',
           is_online: false,
+          is_garde: false,
           is_active: true,
+          is_verified: true,
           is_pending: false,
-          statut: 'approved',
           created_at: source.created_at || now,
           updated_at: now,
         });
@@ -811,15 +745,16 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
 
   memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
   if (found) {
-    found.statut = 'approved';
     found.is_active = true;
+    found.is_verified = true;
     found.is_pending = false;
     found.updated_at = now;
   } else if (memPending) {
     memoryPharmacies.unshift({
-      id,
+      id: isValidUuid(id) ? id : generateUuid(),
       nom: memPending.nom,
       tel: memPending.phone,
+      phone: memPending.phone,
       adresse: memPending.adresse,
       quartier: memPending.quartier,
       lat: memPending.lat,
@@ -832,9 +767,10 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
       mot_de_passe: memPending.mot_de_passe,
       plan: 'free',
       is_online: false,
+      is_garde: false,
       is_active: true,
+      is_verified: true,
       is_pending: false,
-      statut: 'approved',
       created_at: memPending.created_at || now,
       updated_at: now,
     });
@@ -846,34 +782,14 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
 
 export async function rejectPharmacySuperAdmin(id: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const found = memoryPharmacies.find((p) => p.id === id);
-  if (found) {
-    found.statut = 'rejected';
-    found.is_active = false;
-    found.is_pending = false;
-    found.updated_at = now;
-  }
   memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
 
   try {
     const client = getSupabaseClient();
     if (client) {
-      const { error: pharmaErr } = await client
-        .from('pharmacies')
-        .update({
-          statut: 'rejected',
-          is_active: false,
-          is_pending: false,
-          updated_at: now,
-        })
-        .eq('id', id);
-      if (pharmaErr) {
-        console.warn('[EFA] rejectPharmacySuperAdmin pharmacies:', pharmaErr.message);
-      }
-
       const { error: pendErr } = await client
         .from('pharmacies_pending')
-        .update({ statut: 'rejected', status: 'rejected', reviewed_at: now })
+        .update({ status: 'rejected', reviewed_at: now })
         .eq('id', id);
       if (pendErr) {
         console.warn('[EFA] rejectPharmacySuperAdmin pending:', pendErr.message);
@@ -893,14 +809,18 @@ export function updatePharmacyStatus(
 ): Pharmacie | null {
   const idx = memoryPharmacies.findIndex((p) => p.id === pharmacieId);
   if (idx === -1) return null;
-  memoryPharmacies[idx] = { ...memoryPharmacies[idx], is_online: isOnline };
+  memoryPharmacies[idx] = {
+    ...memoryPharmacies[idx],
+    is_garde: isOnline,
+    is_online: isOnline,
+  };
 
   try {
     const sb = getSupabaseClient();
-    if (sb) {
+    if (sb && isValidUuid(pharmacieId)) {
       sb.from('pharmacies')
         .update({
-          is_online: isOnline,
+          is_garde: isOnline,
           updated_at: new Date().toISOString(),
         })
         .eq('id', pharmacieId)
@@ -995,6 +915,7 @@ export async function activateSubscriptionInDB(
     subscription_end: end.toISOString(),
     subscription_days_left: durationDays,
     is_active: true,
+    is_verified: true,
     is_premium: isPremium,
     etoile_doree: isPremium,
     position: isPremium ? 0 : 1,
@@ -1012,12 +933,11 @@ export async function activateSubscriptionInDB(
         : planType === 'premium_15k'
         ? 15000
         : 90000,
-    statut: 'approved',
   };
 
   try {
     const client = getSupabaseClient();
-    if (client) {
+    if (client && isValidUuid(pharmacyId)) {
       await client
         .from('pharmacies')
         .update(updates)
@@ -1025,46 +945,73 @@ export async function activateSubscriptionInDB(
 
       const currentPharma = memoryPharmacies.find((p) => p.id === pharmacyId);
       const pharmaNom = updates.nom || currentPharma?.nom || 'Pharmacie';
-      const abnPayload = {
-        id: crypto.randomUUID(),
-        entreprise_id: pharmacyId,
-        pharmacie_id: pharmacyId,
-        nom_pharmacie: pharmaNom,
-        telephone: currentPharma?.tel || null,
-        email: currentPharma?.email_pro || null,
-        plan: updates.plan || 'populaire_mensuel',
-        statut: 'actif',
-        montant: updates.prix || 15000,
-        date_debut: now.toISOString(),
-        expire_le: end.toISOString(),
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-      };
-      const { error: abnInsertErr } = await client
+
+      const { data: existingAbn } = await client
         .from('abonnements')
-        .insert([abnPayload]);
-      if (abnInsertErr) {
-        if (
-          abnInsertErr.code === '23505' ||
-          abnInsertErr.message?.includes('duplicate')
-        ) {
+        .select('id')
+        .eq('pharmacy_id', pharmacyId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingAbn?.id) {
+        const { error: abnUpdErr } = await client
+          .from('abonnements')
+          .update({
+            pharmacy_id: pharmacyId,
+            nom_pharmacie: pharmaNom,
+            plan: updates.plan || 'populaire_mensuel',
+            statut: 'actif',
+            montant: updates.prix || 15000,
+            date_debut: now.toISOString(),
+            expire_le: end.toISOString(),
+            updated_at: now.toISOString(),
+          })
+          .eq('id', existingAbn.id);
+        if (abnUpdErr) {
           await client
             .from('abonnements')
             .update({
-              pharmacie_id: pharmacyId,
-              nom_pharmacie: pharmaNom,
-              telephone: currentPharma?.tel || null,
-              email: currentPharma?.email_pro || null,
+              pharmacy_id: pharmacyId,
               plan: updates.plan || 'populaire_mensuel',
               statut: 'actif',
               montant: updates.prix || 15000,
               date_debut: now.toISOString(),
               expire_le: end.toISOString(),
-              updated_at: now.toISOString(),
             })
-            .eq('entreprise_id', pharmacyId);
-        } else {
-          console.warn('[EFA GARDE] INSERT abonnements:', abnInsertErr.message);
+            .eq('id', existingAbn.id);
+        }
+      } else {
+        const abnPayload = {
+          id: generateUuid(),
+          pharmacy_id: pharmacyId,
+          entreprise_id: pharmacyId,
+          nom_pharmacie: pharmaNom,
+          plan: updates.plan || 'populaire_mensuel',
+          statut: 'actif',
+          montant: updates.prix || 15000,
+          date_debut: now.toISOString(),
+          expire_le: end.toISOString(),
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+        };
+        const { error: abnInsertErr } = await client
+          .from('abonnements')
+          .insert([abnPayload]);
+        if (abnInsertErr) {
+          const { error: minErr } = await client.from('abonnements').insert([
+            {
+              id: abnPayload.id,
+              pharmacy_id: pharmacyId,
+              plan: abnPayload.plan,
+              statut: 'actif',
+              montant: abnPayload.montant,
+              date_debut: abnPayload.date_debut,
+              expire_le: abnPayload.expire_le,
+            },
+          ]);
+          if (minErr) {
+            console.warn('[EFA GARDE] INSERT abonnements:', minErr.message);
+          }
         }
       }
     }
@@ -1080,15 +1027,16 @@ export async function activateSubscriptionInDB(
 export async function fetchPharmacyById(id: string): Promise<Pharmacie | null> {
   try {
     const client = getSupabaseClient();
-    if (client) {
+    if (client && isValidUuid(id)) {
       const { data, error } = await client
         .from('pharmacies')
         .select('*')
         .eq('id', id)
         .single();
       if (!error && data) {
-        updatePharmacySuperAdmin(id, data as Pharmacie);
-        return data as Pharmacie;
+        const normalized = normalizePharmacyRow(data);
+        updatePharmacySuperAdmin(id, normalized);
+        return normalized;
       }
     }
   } catch (err) {
@@ -1137,11 +1085,13 @@ export async function registerNewPharmacy(data: {
       lat: data.lat,
       lng: data.lng,
       tel: data.tel,
+      phone: data.tel,
       plan: 'free',
       is_online: data.is_online,
-      statut: 'pending',
+      is_garde: data.is_online,
       is_pending: true,
       is_active: false,
+      is_verified: false,
     }
   );
 }
@@ -1409,7 +1359,7 @@ export async function fetchDemandesAbonnement(): Promise<DemandeAbonnement[]> {
           code_validation: d.code_validation,
           created_at: d.created_at || new Date().toISOString(),
           validated_at: d.validated_at,
-          pharmacie_id: d.pharmacie_id,
+          pharmacie_id: d.pharmacy_id || d.pharmacie_id,
         }));
         memoryDemandesAbonnement = mapped;
         notifyChange();
@@ -1485,6 +1435,7 @@ export async function createSubscriptionPaymentRequest(data: {
         {
           id: demande.id,
           entreprise_id: entrepriseId,
+          pharmacy_id: null,
           pharmacie_id: null,
           nom_pharmacie: demande.nom_pharmacie,
           telephone: demande.telephone,
@@ -1661,7 +1612,7 @@ export async function verifyRegistrationCode(
 }
 
 export async function fetchAbonnements(
-  pharmacieId?: string
+  pharmacyId?: string
 ): Promise<Abonnement[]> {
   try {
     const sb = getSupabaseClient();
@@ -1671,8 +1622,11 @@ export async function fetchAbonnements(
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (pharmacieId) {
-        query = query.eq('pharmacie_id', pharmacieId);
+      if (pharmacyId) {
+        if (!isValidUuid(pharmacyId)) {
+          return [];
+        }
+        query = query.eq('pharmacy_id', pharmacyId);
       }
 
       const { data, error } = await query;

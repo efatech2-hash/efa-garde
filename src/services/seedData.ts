@@ -205,15 +205,10 @@ create table if not exists pharmacies (
   lng double precision not null,
   adresse text not null,
   plan text check (plan in ('free', '60k', 'top')) default 'free',
-  is_online boolean default false
-);
-
--- 2. Table gardes
-create table if not exists gardes (
-  id uuid primary key default gen_random_uuid(),
-  pharmacie_id uuid references pharmacies(id) on delete cascade,
-  date_debut timestamp with time zone not null,
-  date_fin timestamp with time zone not null
+  is_online boolean default false,
+  is_garde boolean default false,
+  is_verified boolean default false,
+  is_active boolean default true
 );
 
 -- 3. Table conversations
@@ -251,7 +246,7 @@ create table if not exists pharmacies_pending (
   lng double precision not null,
   photo_url text,
   horaires text,
-  statut text check (statut in ('pending', 'approved', 'rejected')) default 'pending',
+  status text default 'pending',
   created_at timestamp with time zone default now()
 );
 
@@ -271,7 +266,6 @@ create table if not exists pubs (
 -- Enable Realtime for tables
 alter publication supabase_realtime add table pharmacies;
 alter publication supabase_realtime add table pharmacies_pending;
-alter publication supabase_realtime add table gardes;
 alter publication supabase_realtime add table conversations;
 alter publication supabase_realtime add table messages;
 alter publication supabase_realtime add table pubs;

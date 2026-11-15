@@ -109,11 +109,11 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
     refreshList();
   };
 
-  const isPendingStatus = (s: string) => s === 'pending' || s === 'en_attente';
-  const pendingCount = pendingList.filter((p) => isPendingStatus(p.statut)).length;
+  const isPendingStatus = (s: string) => s === 'pending';
+  const pendingCount = pendingList.filter((p) => isPendingStatus(p.status)).length;
   const filteredList =
     activeTab === 'pending'
-      ? pendingList.filter((p) => isPendingStatus(p.statut))
+      ? pendingList.filter((p) => isPendingStatus(p.status))
       : pendingList;
 
   return (
@@ -354,7 +354,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {filteredList.map((p) => {
-              const isPending = p.statut === 'pending' || p.statut === 'en_attente';
+              const isPending = p.status === 'pending';
 
               return (
                 <div
@@ -362,7 +362,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
                   className={`bg-slate-900 border rounded-3xl p-5 sm:p-6 shadow-xl transition-all space-y-4 ${
                     isPending
                       ? 'border-amber-500/50 ring-2 ring-amber-500/10'
-                      : p.statut === 'approved'
+                      : p.status === 'approved' || p.status === 'transferred' || p.status === 'valide'
                       ? 'border-emerald-500/30'
                       : 'border-red-500/30 opacity-70'
                   }`}
@@ -377,16 +377,16 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
 
                         <span
                           className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                            p.statut === 'approved'
+                            p.status === 'approved' || p.status === 'transferred' || p.status === 'valide'
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                              : p.statut === 'rejected'
+                              : p.status === 'rejected'
                               ? 'bg-red-500/20 text-red-300 border border-red-500/40'
                               : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                           }`}
                         >
-                          {p.statut === 'approved'
+                          {p.status === 'approved' || p.status === 'transferred' || p.status === 'valide'
                             ? 'APPROUVÉE ✓'
-                            : p.statut === 'rejected'
+                            : p.status === 'rejected'
                             ? 'REFUSÉE ✕'
                             : 'EN ATTENTE DE VÉRIFICATION'}
                         </span>

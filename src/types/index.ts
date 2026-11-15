@@ -14,11 +14,14 @@ export interface Pharmacie {
   id: string;
   nom: string;
   tel: string;
+  phone?: string;
   lat: number;
   lng: number;
   adresse: string;
   plan: PlanType;
   is_online: boolean;
+  is_garde?: boolean;
+  is_verified?: boolean;
   is_active?: boolean;
   is_registered?: boolean;
   subscription_plan?: SubscriptionPlan;
@@ -42,7 +45,6 @@ export interface Pharmacie {
   piece_url?: string;
   email_pro?: string;
   mot_de_passe?: string;
-  statut?: 'pending' | 'en_attente' | 'approved' | 'rejected';
   itinerary_clicks?: number;
   horaires?: string;
   created_at?: string;
@@ -74,7 +76,7 @@ export interface PharmaciePending {
   lat: number;
   lng: number;
   photo_url?: string;
-  statut: 'pending' | 'valide' | 'en_attente' | 'approved' | 'rejected';
+  status: 'pending' | 'valide' | 'transferred' | 'approved' | 'rejected';
   created_at: string;
 }
 
@@ -173,7 +175,8 @@ export interface DemandeAbonnement {
 export interface Abonnement {
   id: string;
   entreprise_id?: string;
-  pharmacie_id: string;
+  pharmacy_id?: string;
+  pharmacie_id?: string;
   nom_pharmacie?: string;
   plan: string;
   statut: string;
