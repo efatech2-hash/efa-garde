@@ -202,7 +202,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   const refreshPending = async () => {
     try {
       const p = await fetchPendingPharmacies();
-      setPendingPharmacies(p);
+      setPendingPharmacies(p.filter((item) => item.statut === 'pending'));
     } catch {
       setPendingPharmacies(loadPendingPharmacies());
     }
@@ -215,7 +215,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
       refreshSignalements();
       refreshClientsCount();
       refreshDemandes();
-      refreshPending();
+      setPendingPharmacies(loadPendingPharmacies());
     });
     fetchPharmacies().then((data) => setPharmacies(data)).catch(() => {});
     refreshSignalements();
@@ -342,7 +342,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     if (success) {
       await fetchPharmacies();
       setPharmacies(loadPharmacies());
-      refreshPending();
+      await refreshPending();
       showToast(`🎉 Pharmacie validée avec succès ! Elle est désormais visible sur l'application.`);
     }
   };
@@ -350,7 +350,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   // Action : Refuser la souscription d'une pharmacie
   const handleRejectPharmacy = async (pendingId: string) => {
     await rejectPharmacySuperAdmin(pendingId);
-    refreshPending();
+    await refreshPending();
     showToast(`Demande de souscription refusée.`);
   };
 

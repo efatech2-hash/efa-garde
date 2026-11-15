@@ -74,7 +74,7 @@ export interface PharmaciePending {
   lat: number;
   lng: number;
   photo_url?: string;
-  statut: 'pending' | 'en_attente' | 'approved' | 'rejected';
+  statut: 'pending' | 'valide' | 'en_attente' | 'approved' | 'rejected';
   created_at: string;
 }
 

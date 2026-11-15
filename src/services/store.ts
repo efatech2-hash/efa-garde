@@ -406,34 +406,7 @@ export function loadAllPharmaciesWithPending(): Pharmacie[] {
  * Super Admin : Liste des pharmacies en attente de vérification
  */
 export function loadPendingPharmacies(): PharmaciePending[] {
-  const fromMem = memoryPharmacies
-    .filter(
-      (p) =>
-        !isDemoPharmacy(p) &&
-        (p.statut === 'pending' ||
-          p.statut === 'en_attente' ||
-          p.is_pending === true)
-    )
-    .map((p) => ({
-      id: p.id,
-      nom: p.nom,
-      quartier: p.quartier || 'Lomé',
-      adresse: p.adresse || '',
-      phone: p.tel || '',
-      titulaire: p.titulaire || 'Titulaire Officine',
-      numero_ordre: p.numero_ordre,
-      piece_url: p.piece_url,
-      photo_url: p.photo_url,
-      email_pro: p.email_pro,
-      mot_de_passe: p.mot_de_passe,
-      lat: p.lat || 6.1319,
-      lng: p.lng || 1.2228,
-      statut: 'en_attente' as const,
-      created_at: p.created_at || new Date().toISOString(),
-    }));
-
-  if (fromMem.length > 0) return fromMem;
-  return memoryPendingPharmacies;
+  return memoryPendingPharmacies.filter((p) => p.statut === 'pending');
 }
 
 export function savePendingPharmacies(list: PharmaciePending[]) {
@@ -446,9 +419,9 @@ export async function fetchPendingPharmacies(): Promise<PharmaciePending[]> {
     const client = getSupabaseClient();
     if (client) {
       const { data, error } = await client
-        .from('pharmacies')
+        .from('pharmacies_pending')
         .select('*')
-        .or('statut.eq.pending,statut.eq.en_attente,is_pending.eq.true')
+        .eq('statut', 'pending')
         .order('created_at', { ascending: false });
 
       if (!error && data && Array.isArray(data)) {
@@ -457,7 +430,7 @@ export async function fetchPendingPharmacies(): Promise<PharmaciePending[]> {
           nom: p.nom,
           quartier: p.quartier || 'Lomé',
           adresse: p.adresse || '',
-          phone: p.tel || p.phone || '',
+          phone: p.phone || p.tel || '',
           titulaire: p.titulaire || 'Titulaire Officine',
           numero_ordre: p.numero_ordre,
           piece_url: p.piece_url,
@@ -466,11 +439,10 @@ export async function fetchPendingPharmacies(): Promise<PharmaciePending[]> {
           mot_de_passe: p.mot_de_passe,
           lat: p.lat || 6.1319,
           lng: p.lng || 1.2228,
-          statut: 'en_attente',
+          statut: 'pending',
           created_at: p.created_at || new Date().toISOString(),
         }));
         memoryPendingPharmacies = list;
-        notifyChange();
         return list;
       }
     }
@@ -495,7 +467,7 @@ export async function addPendingPharmacy(
   const newPending: PharmaciePending = {
     ...entry,
     id,
-    statut: 'en_attente',
+    statut: 'pending',
     created_at: now,
   };
 
@@ -630,46 +602,159 @@ export async function addPendingPharmacy(
 
 /**
  * VALIDER ET PUBLIER (Super Admin Dashboard) :
- * UPDATE public.pharmacies SET statut='approved', is_active=true, is_pending=false
- * Seulement là, la pharmacie devient visible sur la carte publique !
+ * 1) UPDATE public.pharmacies_pending SET statut='valide' WHERE id=...
+ * 2) INSERT INTO public.pharmacies avec les données de cette ligne
  */
 export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
   const now = new Date().toISOString();
+  const memPending = memoryPendingPharmacies.find((p) => p.id === id);
   const found = memoryPharmacies.find((p) => p.id === id);
+
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data: pendingRow } = await client
+        .from('pharmacies_pending')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      const source: any = pendingRow || memPending || found;
+
+      // 1) UPDATE pharmacies_pending SET statut='valide' WHERE id=...
+      const { error: pendErr } = await client
+        .from('pharmacies_pending')
+        .update({ statut: 'valide' })
+        .eq('id', id);
+      if (pendErr) {
+        console.warn('[EFA] approvePharmacySuperAdmin pending:', pendErr.message);
+      }
+
+      // 2) INSERT INTO pharmacies avec les données de cette ligne
+      const pharmacyPayload = {
+        id,
+        nom: source?.nom || 'Pharmacie',
+        tel: source?.phone || source?.tel || '',
+        phone: source?.phone || source?.tel || '',
+        adresse: source?.adresse || '',
+        quartier: source?.quartier || 'Lomé',
+        lat: source?.lat ?? 6.1319,
+        lng: source?.lng ?? 1.2228,
+        titulaire: source?.titulaire || 'Titulaire Officine',
+        numero_ordre: source?.numero_ordre || 'VALIDE',
+        piece_url: source?.piece_url || null,
+        photo_url: source?.photo_url || null,
+        email_pro: source?.email_pro || null,
+        mot_de_passe: source?.mot_de_passe || null,
+        plan: 'free',
+        is_online: false,
+        is_active: true,
+        is_pending: false,
+        statut: 'approved',
+        created_at: source?.created_at || now,
+        updated_at: now,
+      };
+
+      const { error: insertErr } = await client
+        .from('pharmacies')
+        .insert([pharmacyPayload]);
+
+      if (insertErr) {
+        if (
+          insertErr.code === '23505' ||
+          insertErr.message?.toLowerCase().includes('duplicate')
+        ) {
+          const { error: updateErr } = await client
+            .from('pharmacies')
+            .update({
+              ...pharmacyPayload,
+              statut: 'approved',
+              is_active: true,
+              is_pending: false,
+              updated_at: now,
+            })
+            .eq('id', id);
+          if (updateErr) {
+            console.warn(
+              '[EFA] approvePharmacySuperAdmin pharmacies update:',
+              updateErr.message
+            );
+          }
+        } else {
+          console.warn(
+            '[EFA] approvePharmacySuperAdmin pharmacies insert:',
+            insertErr.message
+          );
+        }
+      }
+
+      memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
+      if (found) {
+        found.statut = 'approved';
+        found.is_active = true;
+        found.is_pending = false;
+        found.updated_at = now;
+      } else if (source) {
+        memoryPharmacies.unshift({
+          id,
+          nom: source.nom || 'Pharmacie',
+          tel: source.phone || source.tel || '',
+          adresse: source.adresse || '',
+          quartier: source.quartier || 'Lomé',
+          lat: source.lat ?? 6.1319,
+          lng: source.lng ?? 1.2228,
+          titulaire: source.titulaire || 'Titulaire Officine',
+          numero_ordre: source.numero_ordre,
+          piece_url: source.piece_url,
+          photo_url: source.photo_url,
+          email_pro: source.email_pro,
+          mot_de_passe: source.mot_de_passe,
+          plan: 'free',
+          is_online: false,
+          is_active: true,
+          is_pending: false,
+          statut: 'approved',
+          created_at: source.created_at || now,
+          updated_at: now,
+        });
+      }
+
+      notifyChange();
+      return true;
+    }
+  } catch (err) {
+    console.warn('[EFA] approvePharmacySuperAdmin Supabase warning:', err);
+  }
+
+  memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
   if (found) {
     found.statut = 'approved';
     found.is_active = true;
     found.is_pending = false;
     found.updated_at = now;
-  }
-  memoryPendingPharmacies = memoryPendingPharmacies.filter((p) => p.id !== id);
-
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      const { error: pharmaErr } = await client
-        .from('pharmacies')
-        .update({
-          statut: 'approved',
-          is_active: true,
-          is_pending: false,
-          updated_at: now,
-        })
-        .eq('id', id);
-      if (pharmaErr) {
-        console.warn('[EFA] approvePharmacySuperAdmin pharmacies:', pharmaErr.message);
-      }
-
-      const { error: pendErr } = await client
-        .from('pharmacies_pending')
-        .update({ statut: 'approved', status: 'approved', reviewed_at: now })
-        .eq('id', id);
-      if (pendErr) {
-        console.warn('[EFA] approvePharmacySuperAdmin pending:', pendErr.message);
-      }
-    }
-  } catch (err) {
-    console.warn('[EFA] approvePharmacySuperAdmin Supabase warning:', err);
+  } else if (memPending) {
+    memoryPharmacies.unshift({
+      id,
+      nom: memPending.nom,
+      tel: memPending.phone,
+      adresse: memPending.adresse,
+      quartier: memPending.quartier,
+      lat: memPending.lat,
+      lng: memPending.lng,
+      titulaire: memPending.titulaire,
+      numero_ordre: memPending.numero_ordre,
+      piece_url: memPending.piece_url,
+      photo_url: memPending.photo_url,
+      email_pro: memPending.email_pro,
+      mot_de_passe: memPending.mot_de_passe,
+      plan: 'free',
+      is_online: false,
+      is_active: true,
+      is_pending: false,
+      statut: 'approved',
+      created_at: memPending.created_at || now,
+      updated_at: now,
+    });
   }
 
   notifyChange();
@@ -2498,8 +2583,9 @@ export function initSupabaseRealtime(): void {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'pharmacies_pending' },
         () => {
-          fetchPendingPharmacies().catch(() => {});
-          notifyChange();
+          fetchPendingPharmacies()
+            .then(() => notifyChange())
+            .catch(() => {});
         }
       )
       .on(

@@ -159,6 +159,7 @@ BEGIN
   ALTER TABLE public.pharmacies_pending ALTER COLUMN numero_ordre DROP NOT NULL;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+ALTER TABLE public.pharmacies_pending DROP CONSTRAINT IF EXISTS pharmacies_pending_statut_check;
 
 ALTER TABLE public.pharmacies_pending ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "pending_insert_public" ON public.pharmacies_pending;
