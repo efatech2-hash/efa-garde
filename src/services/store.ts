@@ -602,8 +602,9 @@ export async function addPendingPharmacy(
 
 /**
  * VALIDER ET PUBLIER (Super Admin Dashboard) :
- * 1) UPDATE public.pharmacies_pending SET statut='valide' WHERE id=...
- * 2) INSERT INTO public.pharmacies avec les données de cette ligne
+ * 1) UPDATE public.pharmacies_pending SET statut='valide', status='valide', reviewed_at=NOW() WHERE id=...
+ * 2) INSERT INTO public.pharmacies (nom, phone, adresse, quartier, lat, lng, email_pro, is_active=true) depuis cette ligne
+ *    Si phone existe déjà dans pharmacies -> UPDATE au lieu d'INSERT.
  */
 export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
   const now = new Date().toISOString();
@@ -620,22 +621,64 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
         .maybeSingle();
 
       const source: any = pendingRow || memPending || found;
+      const rowPhone = String(source?.phone || source?.tel || '').trim();
 
-      // 1) UPDATE pharmacies_pending SET statut='valide' WHERE id=...
+      // 1) UPDATE pharmacies_pending SET statut='valide', status='valide', reviewed_at=NOW() WHERE id=...
       const { error: pendErr } = await client
         .from('pharmacies_pending')
-        .update({ statut: 'valide' })
+        .update({
+          statut: 'valide',
+          status: 'valide',
+          reviewed_at: now,
+        })
         .eq('id', id);
       if (pendErr) {
         console.warn('[EFA] approvePharmacySuperAdmin pending:', pendErr.message);
+        await client
+          .from('pharmacies_pending')
+          .update({ statut: 'valide' })
+          .eq('id', id);
       }
 
-      // 2) INSERT INTO pharmacies avec les données de cette ligne
-      const pharmacyPayload = {
-        id,
+      // 2) Vérifie si phone existe déjà dans pharmacies (UPDATE au lieu d'INSERT)
+      let existingPharmaId: string | null = null;
+      if (rowPhone) {
+        const { data: existingByPhone } = await client
+          .from('pharmacies')
+          .select('id')
+          .eq('phone', rowPhone)
+          .limit(1)
+          .maybeSingle();
+        if (existingByPhone?.id) {
+          existingPharmaId = String(existingByPhone.id);
+        } else {
+          const { data: existingByTel } = await client
+            .from('pharmacies')
+            .select('id')
+            .eq('tel', rowPhone)
+            .limit(1)
+            .maybeSingle();
+          if (existingByTel?.id) {
+            existingPharmaId = String(existingByTel.id);
+          }
+        }
+      }
+      if (!existingPharmaId) {
+        const { data: existingById } = await client
+          .from('pharmacies')
+          .select('id')
+          .eq('id', id)
+          .limit(1)
+          .maybeSingle();
+        if (existingById?.id) {
+          existingPharmaId = String(existingById.id);
+        }
+      }
+
+      const pharmacyFields = {
         nom: source?.nom || 'Pharmacie',
-        tel: source?.phone || source?.tel || '',
-        phone: source?.phone || source?.tel || '',
+        tel: rowPhone,
+        phone: rowPhone,
         adresse: source?.adresse || '',
         quartier: source?.quartier || 'Lomé',
         lat: source?.lat ?? 6.1319,
@@ -646,45 +689,85 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
         photo_url: source?.photo_url || null,
         email_pro: source?.email_pro || null,
         mot_de_passe: source?.mot_de_passe || null,
-        plan: 'free',
-        is_online: false,
         is_active: true,
         is_pending: false,
         statut: 'approved',
-        created_at: source?.created_at || now,
         updated_at: now,
       };
 
-      const { error: insertErr } = await client
-        .from('pharmacies')
-        .insert([pharmacyPayload]);
-
-      if (insertErr) {
-        if (
-          insertErr.code === '23505' ||
-          insertErr.message?.toLowerCase().includes('duplicate')
-        ) {
-          const { error: updateErr } = await client
+      if (existingPharmaId) {
+        const { error: updateErr } = await client
+          .from('pharmacies')
+          .update(pharmacyFields)
+          .eq('id', existingPharmaId);
+        if (updateErr) {
+          console.warn(
+            '[EFA] approvePharmacySuperAdmin pharmacies update:',
+            updateErr.message
+          );
+          await client
             .from('pharmacies')
             .update({
-              ...pharmacyPayload,
-              statut: 'approved',
+              nom: source?.nom || 'Pharmacie',
+              phone: rowPhone,
+              adresse: source?.adresse || '',
+              quartier: source?.quartier || 'Lomé',
+              lat: source?.lat ?? 6.1319,
+              lng: source?.lng ?? 1.2228,
+              email_pro: source?.email_pro || null,
               is_active: true,
-              is_pending: false,
-              updated_at: now,
             })
-            .eq('id', id);
-          if (updateErr) {
+            .eq('id', existingPharmaId);
+        }
+      } else {
+        const { error: insertErr } = await client
+          .from('pharmacies')
+          .insert([
+            {
+              id,
+              ...pharmacyFields,
+              plan: 'free',
+              is_online: false,
+              created_at: source?.created_at || now,
+            },
+          ]);
+
+        if (insertErr) {
+          if (
+            insertErr.code === '23505' ||
+            insertErr.message?.toLowerCase().includes('duplicate')
+          ) {
+            await client
+              .from('pharmacies')
+              .update(pharmacyFields)
+              .eq('id', id);
+          } else {
             console.warn(
-              '[EFA] approvePharmacySuperAdmin pharmacies update:',
-              updateErr.message
+              '[EFA] approvePharmacySuperAdmin pharmacies insert:',
+              insertErr.message
             );
+            // Retry minimal INSERT avec les colonnes essentielles (au cas où id UUID auto ou colonne absente)
+            const { error: minInsertErr } = await client
+              .from('pharmacies')
+              .insert([
+                {
+                  nom: source?.nom || 'Pharmacie',
+                  phone: rowPhone,
+                  adresse: source?.adresse || '',
+                  quartier: source?.quartier || 'Lomé',
+                  lat: source?.lat ?? 6.1319,
+                  lng: source?.lng ?? 1.2228,
+                  email_pro: source?.email_pro || null,
+                  is_active: true,
+                },
+              ]);
+            if (minInsertErr) {
+              console.warn(
+                '[EFA] approvePharmacySuperAdmin minimal insert:',
+                minInsertErr.message
+              );
+            }
           }
-        } else {
-          console.warn(
-            '[EFA] approvePharmacySuperAdmin pharmacies insert:',
-            insertErr.message
-          );
         }
       }
 
@@ -696,9 +779,9 @@ export async function approvePharmacySuperAdmin(id: string): Promise<boolean> {
         found.updated_at = now;
       } else if (source) {
         memoryPharmacies.unshift({
-          id,
+          id: existingPharmaId || id,
           nom: source.nom || 'Pharmacie',
-          tel: source.phone || source.tel || '',
+          tel: rowPhone,
           adresse: source.adresse || '',
           quartier: source.quartier || 'Lomé',
           lat: source.lat ?? 6.1319,
@@ -2735,15 +2818,28 @@ export function initSupabaseRealtime(): void {
  * CHARGEMENT INITIAL DEPUIS SUPABASE :
  * 1. NE PAS await le Realtime.
  * 2. SELECTs simples en parallèle (pharmacies, clients, abonnements, conversations).
- * 3. Timeout strict de 3 secondes : si dépassé, affiche quand même l'app.
+ * 3. Timeout strict de 10 secondes : si dépassé, affiche quand même l'app avec bouton Réessayer.
  * 4. Ensuite seulement, en arrière-plan, subscribe au websocket.
- * 5. Pas de boucle si websocket échoue, polling 30s en secours.
+ * 5. Pas de boucle si timeout ou websocket échoue, polling 30s en secours.
  */
-let bootstrapAttempted = false;
+export type BootstrapStatus = 'idle' | 'loading' | 'success' | 'timeout';
 
-export async function bootstrapStoreFromSupabase(): Promise<void> {
-  if (bootstrapAttempted) return;
+let bootstrapAttempted = false;
+let bootstrapStatus: BootstrapStatus = 'idle';
+
+export function getBootstrapStatus(): BootstrapStatus {
+  return bootstrapStatus;
+}
+
+export async function bootstrapStoreFromSupabase(
+  force = false
+): Promise<void> {
+  if (bootstrapAttempted && !force) return;
   bootstrapAttempted = true;
+  bootstrapStatus = 'loading';
+  if (force) {
+    notifyChange();
+  }
 
   const selectQueries = Promise.allSettled([
     fetchApprovedPharmacies(),
@@ -2753,18 +2849,25 @@ export async function bootstrapStoreFromSupabase(): Promise<void> {
     fetchConversations(),
   ]);
 
-  const timeoutPromise = new Promise<'timeout'>((resolve) =>
-    setTimeout(() => resolve('timeout'), 3000)
-  );
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<'timeout'>((resolve) => {
+    timeoutId = setTimeout(() => resolve('timeout'), 10000);
+  });
 
   try {
     const outcome = await Promise.race([selectQueries, timeoutPromise]);
+    if (timeoutId) clearTimeout(timeoutId);
     if (outcome === 'timeout') {
+      bootstrapStatus = 'timeout';
       console.warn(
-        '[EFA GARDE] Timeout 3s atteint sur bootstrap, ouverture immédiate avec données disponibles.'
+        '[EFA GARDE] Timeout 10s atteint sur bootstrap, ouverture immédiate avec bouton Réessayer.'
       );
+    } else {
+      bootstrapStatus = 'success';
     }
   } catch (err) {
+    if (timeoutId) clearTimeout(timeoutId);
+    bootstrapStatus = 'timeout';
     console.warn('[EFA GARDE] bootstrapStoreFromSupabase error:', err);
   } finally {
     // Affiche l'app / met à jour les écouteurs de store
@@ -2775,6 +2878,10 @@ export async function bootstrapStoreFromSupabase(): Promise<void> {
       initSupabaseRealtime();
     }, 100);
   }
+}
+
+export async function retryBootstrapStoreFromSupabase(): Promise<void> {
+  return bootstrapStoreFromSupabase(true);
 }
 
 if (typeof window !== 'undefined') {

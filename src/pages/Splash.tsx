@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Logo } from '../components/Logo';
 
 interface SplashProps {
@@ -11,6 +11,8 @@ interface SplashProps {
  */
 export const Splash: React.FC<SplashProps> = ({ onComplete, duration = 2000 }) => {
   const [progress, setProgress] = useState(0);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     const startTime = Date.now();
@@ -21,12 +23,12 @@ export const Splash: React.FC<SplashProps> = ({ onComplete, duration = 2000 }) =
 
       if (elapsed >= duration) {
         clearInterval(interval);
-        onComplete();
+        onCompleteRef.current();
       }
     }, 40);
 
     return () => clearInterval(interval);
-  }, [duration, onComplete]);
+  }, [duration]);
 
   return (
     <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center p-6 select-none animate-in fade-in duration-300">

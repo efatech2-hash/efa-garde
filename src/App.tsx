@@ -10,6 +10,9 @@ import {
   subscribeToStore,
   cleanExpiredMessages,
   bootstrapStoreFromSupabase,
+  getBootstrapStatus,
+  retryBootstrapStoreFromSupabase,
+  BootstrapStatus,
 } from './services/store';
 import { getSession, clearSession, setSession } from './lib/auth';
 import { Map } from './pages/Map';
@@ -109,6 +112,10 @@ export default function App() {
   // Splash Screen & Auth Lifecycle
   const [showSplash, setShowSplash] = useState(true);
   const [session, setLocalSession] = useState(() => getSession());
+  const [bootstrapStatus, setBootstrapStatus] = useState<BootstrapStatus>(() =>
+    getBootstrapStatus()
+  );
+  const [isRetryingBootstrap, setIsRetryingBootstrap] = useState(false);
 
   // Welcome modal trigger : si aucun rôle n'a encore été choisi
   const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(() => {
@@ -219,6 +226,7 @@ export default function App() {
 
     const unsubscribe = subscribeToStore(() => {
       setPharmacies(loadAllPharmaciesWithPending());
+      setBootstrapStatus(getBootstrapStatus());
     });
     return () => unsubscribe();
   }, []);
@@ -982,6 +990,28 @@ export default function App() {
               : 'overflow-x-hidden'
           }`}
         >
+          {bootstrapStatus === 'timeout' && (
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3">
+              <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+                <span className="text-xs sm:text-sm font-semibold">
+                  Délai de chargement dépassé (10s). Vérifiez votre connexion et cliquez sur Réessayer.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRetryingBootstrap(true);
+                    retryBootstrapStoreFromSupabase().finally(() =>
+                      setIsRetryingBootstrap(false)
+                    );
+                  }}
+                  disabled={isRetryingBootstrap}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  {isRetryingBootstrap ? 'Chargement...' : 'Réessayer'}
+                </button>
+              </div>
+            </div>
+          )}
           {content}
         </main>
       </div>
