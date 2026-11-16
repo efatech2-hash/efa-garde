@@ -296,7 +296,7 @@ export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
     if (!a.etoile_doree && b.etoile_doree) return 1;
 
     // 4. alphabetical
-    return a.nom.localeCompare(b.nom);
+    return (a.nom || '').localeCompare(b.nom || '');
   });
 }
 
@@ -364,6 +364,7 @@ function normalizePharmacyRow(p: any): Pharmacie {
   const lng = parseCoord(p.lng ?? p.longitude, 1.2228);
   return {
     ...p,
+    nom: p.nom || 'Pharmacie',
     tel: phone,
     phone,
     adresse: p.adresse || '',
@@ -504,34 +505,20 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
 }
 
 /**
- * CARTE PUBLIQUE : SELECT * FROM public.view_pharmacies_garde WHERE is_active=true
- * Ne bloque pas sur is_verified=true, is_garde=true ni latitude=null.
+ * CARTE PUBLIQUE : Lecture directe FROM public.pharmacies WHERE is_active=true
+ * Aucun filtre sur statut_validation, is_verified, is_garde ni latitude null.
  */
 export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
   try {
     const client = getSupabaseClient();
     if (client) {
-      let { data, error } = await client
-        .from('view_pharmacies_garde')
+      const { data, error } = await client
+        .from('pharmacies')
         .select('*')
         .eq('is_active', true);
 
-      if (error || !Array.isArray(data) || data.length === 0) {
-        if (error) {
-          console.warn(
-            '[EFA GARDE] view_pharmacies_garde fallback vers pharmacies:',
-            error.message
-          );
-        }
-        const fallbackRes = await client
-          .from('pharmacies')
-          .select('*')
-          .eq('is_active', true);
-        data = fallbackRes.data;
-        error = fallbackRes.error;
-        if (error) {
-          console.error('[EFA GARDE] Erreur SELECT pharmacies:', error.message);
-        }
+      if (error) {
+        console.error('[EFA GARDE] Erreur SELECT pharmacies:', error.message);
       }
 
       if (!error && data && Array.isArray(data)) {
@@ -573,7 +560,7 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
         );
         const sorted = sortPharmaciesPriority(enriched);
 
-        console.log('pharmacies', sorted);
+        console.log(sorted);
 
         // Préserve les inactives déjà en mémoire pour l'admin
         const inactiveOrOther = memoryPharmacies.filter((p) => p.is_active === false);
@@ -586,7 +573,7 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
     console.warn('[EFA GARDE] fetchApprovedPharmacies fallback:', err);
   }
   const fallbackList = loadApprovedPharmacies();
-  console.log('pharmacies', fallbackList);
+  console.log(fallbackList);
   return fallbackList;
 }
 

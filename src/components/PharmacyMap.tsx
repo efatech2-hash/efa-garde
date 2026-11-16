@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { Pharmacie } from '../types';
 import { LOME_CENTER, getDistance, formatDistanceShort } from '../utils/geo';
+import { getSupabaseClient } from '../services/store';
 import { Target, AlertCircle } from 'lucide-react';
 
 interface PharmacyMapProps {
@@ -28,6 +29,67 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
   const userMarkerRef = useRef<L.Marker | null>(null);
   const dottedLinesRef = useRef<L.Polyline[]>([]);
+  const [directPharmacies, setDirectPharmacies] = useState<Pharmacie[]>([]);
+
+  // Lecture directe FROM pharmacies WHERE is_active=true (aucun filtre sur statut_validation)
+  useEffect(() => {
+    let active = true;
+    const loadDirectPharmacies = async () => {
+      try {
+        const client = getSupabaseClient();
+        if (!client) return;
+        const { data, error } = await client
+          .from('pharmacies')
+          .select('*')
+          .eq('is_active', true);
+
+        if (error) {
+          console.error('[PharmacyMap] Erreur SELECT pharmacies:', error.message);
+          return;
+        }
+        if (active && Array.isArray(data)) {
+          const normalized: Pharmacie[] = data.map((p: any) => {
+            const rawLat = p.lat ?? p.latitude;
+            const rawLng = p.lng ?? p.longitude;
+            const lat =
+              rawLat !== null && rawLat !== undefined && rawLat !== '' && Number.isFinite(Number(rawLat))
+                ? Number(rawLat)
+                : LOME_CENTER.lat;
+            const lng =
+              rawLng !== null && rawLng !== undefined && rawLng !== '' && Number.isFinite(Number(rawLng))
+                ? Number(rawLng)
+                : LOME_CENTER.lng;
+            return {
+              ...p,
+              nom: p.nom || 'Pharmacie',
+              tel: String(p.phone || p.tel || ''),
+              phone: String(p.phone || p.tel || ''),
+              adresse: p.adresse || '',
+              quartier: p.quartier || 'Lomé',
+              lat,
+              lng,
+              latitude: p.latitude ?? lat,
+              longitude: p.longitude ?? lng,
+              is_active: p.is_active !== false,
+              is_garde: Boolean(p.is_garde ?? p.is_online),
+              is_online: Boolean(p.is_garde ?? p.is_online),
+            };
+          });
+          console.log('pharmacies', normalized);
+          setDirectPharmacies(normalized);
+        }
+      } catch (err) {
+        console.warn('[PharmacyMap] loadDirectPharmacies error:', err);
+      }
+    };
+    loadDirectPharmacies();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const visiblePharmacies =
+    pharmacies && pharmacies.length > 0 ? pharmacies : directPharmacies;
 
   // Initialize Leaflet map
   useEffect(() => {
@@ -75,17 +137,17 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    console.log('pharmacies', pharmacies);
+    console.log('pharmacies', visiblePharmacies);
 
     // Remove old markers not in current list
     markersRef.current.forEach((marker, id) => {
-      if (!pharmacies.find((p) => p.id === id)) {
+      if (!visiblePharmacies.find((p) => p.id === id)) {
         marker.remove();
         markersRef.current.delete(id);
       }
     });
 
-    pharmacies.forEach((p) => {
+    visiblePharmacies.forEach((p) => {
       // Position : lat ?? latitude , lng ?? longitude (ne jamais filtrer si latitude null)
       const rawLat: unknown = p.lat ?? p.latitude;
       const rawLng: unknown = p.lng ?? p.longitude;
@@ -207,7 +269,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
       map.invalidateSize();
     }, 100);
     return () => clearTimeout(timer);
-  }, [pharmacies, onSelectPharmacy, userPosition]);
+  }, [visiblePharmacies, onSelectPharmacy, userPosition]);
 
   // Update user position marker (Point BLEU "Vous êtes ici" comme Uber) + Lignes pointillées vers les 3 plus proches
   useEffect(() => {
@@ -248,7 +310,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
       }
 
       // Tracer une petite ligne pointillée entre l'utilisateur et les 3 pharmacies les plus proches
-      const validPharmacies = pharmacies
+      const validPharmacies = visiblePharmacies
         .map((p) => {
           const rLat: unknown = p.lat ?? p.latitude;
           const rLng: unknown = p.lng ?? p.longitude;
@@ -289,7 +351,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
       userMarkerRef.current.remove();
       userMarkerRef.current = null;
     }
-  }, [userPosition, pharmacies]);
+  }, [userPosition, visiblePharmacies]);
 
   // Pan to selected pharmacy if changed
   useEffect(() => {
@@ -332,7 +394,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
         {/* Bouton "Itinéraire" : ouvre Google Maps avec itinéraire Client -> Pharmacie */}
         <button
           onClick={() => {
-            const target = selectedPharmacy || pharmacies[0];
+            const target = selectedPharmacy || visiblePharmacies[0];
             const targetLat = target?.lat || 6.1319;
             const targetLng = target?.lng || 1.2228;
             if (navigator.geolocation) {

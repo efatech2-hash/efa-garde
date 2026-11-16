@@ -177,9 +177,10 @@ export const Map: React.FC<MapProps> = ({
 
     return cleanList
       .filter((p) => {
-        const matchSearch =
-          p.nom.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.adresse.toLowerCase().includes(searchQuery.toLowerCase());
+        const nom = (p.nom || '').toLowerCase();
+        const adresse = (p.adresse || '').toLowerCase();
+        const q = searchQuery.toLowerCase();
+        const matchSearch = nom.includes(q) || adresse.includes(q);
         // Si is_always_visible=true, ne jamais les filtrer même si garde = false (onlyOnline)
         const matchOnline = onlyOnline
           ? Boolean(p.is_online || p.is_always_visible)
@@ -231,7 +232,7 @@ export const Map: React.FC<MapProps> = ({
         if (a.is_online && !b.is_online) return -1;
         if (!a.is_online && b.is_online) return 1;
 
-        return a.nom.localeCompare(b.nom);
+        return (a.nom || '').localeCompare(b.nom || '');
       });
   }, [pharmacies, searchQuery, onlyOnline, userLocation]);
 
@@ -373,7 +374,10 @@ export const Map: React.FC<MapProps> = ({
             </h2>
 
             <button
-              onClick={onRefresh}
+              onClick={() => {
+                fetchApprovedPharmacies().catch(() => {});
+                onRefresh();
+              }}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
               title="Rafraîchir"
             >
