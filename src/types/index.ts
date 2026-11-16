@@ -84,9 +84,12 @@ export interface PharmaciePending {
 
 export interface Garde {
   id: string;
-  pharmacie_id: string;
-  date_debut: string; // ISO string
-  date_fin: string;   // ISO string
+  pharmacy_id: string;
+  pharmacie_id?: string;
+  date_debut: string; // ISO string (timestamptz)
+  date_fin: string;   // ISO string (timestamptz)
+  type_garde?: string;
+  created_at?: string;
 }
 
 export interface Conversation {

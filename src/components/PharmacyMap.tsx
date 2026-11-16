@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { Pharmacie } from '../types';
 import { LOME_CENTER, getDistance, formatDistanceShort } from '../utils/geo';
-import { getSupabaseClient } from '../services/store';
+import { getSupabaseClient, fetchGardePlanningStatus } from '../services/store';
 import { Target, AlertCircle } from 'lucide-react';
 
 interface PharmacyMapProps {
@@ -57,6 +57,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
           return;
         }
         if (active && Array.isArray(data)) {
+          const planning = await fetchGardePlanningStatus();
           const normalized: Pharmacie[] = data.map((p: any) => {
             const rawLat = p.lat ?? p.latitude;
             const rawLng = p.lng ?? p.longitude;
@@ -71,7 +72,13 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
             const lat = Number.isFinite(parsedLat) && parsedLat !== 0 ? parsedLat : 6.1319;
             const lng = Number.isFinite(parsedLng) && parsedLng !== 0 ? parsedLng : 1.2228;
             const isActive = p.is_active !== false;
-            const isGarde = Boolean(p.is_garde ?? p.is_online);
+            const hasActiveGarde = planning.ok && planning.activeIds.has(p.id);
+            const hasAnyPlanning = planning.ok && planning.plannedIds.has(p.id);
+            const isGarde = hasActiveGarde
+              ? true
+              : hasAnyPlanning
+              ? false
+              : Boolean(p.is_garde ?? p.is_online);
             return {
               ...p,
               nom: p.nom || 'Pharmacie',

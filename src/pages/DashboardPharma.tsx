@@ -3,6 +3,7 @@ import { Pharmacie, Garde } from '../types';
 import {
   loadPharmacies,
   loadGardes,
+  fetchGardes,
   addGarde,
   deleteGarde,
   updatePharmacyStatus,
@@ -12,6 +13,7 @@ import {
   PharmacyStatsSummary,
   subscribeToStore,
   fetchPharmacyById,
+  fetchApprovedPharmacies,
 } from '../services/store';
 import { getSession } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -179,26 +181,35 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
     }
   };
 
-  // New Garde Form Modal
+  // New Garde Form Modal (Supabase garde_planning)
   const [showAddModal, setShowAddModal] = useState(false);
+  const [typeGarde, setTypeGarde] = useState<string>('24h');
+  const [isSavingGarde, setIsSavingGarde] = useState(false);
+  const [gardeError, setGardeError] = useState<string | null>(null);
+  const [gardeFeedback, setGardeFeedback] = useState<string | null>(null);
+  const formatLocalDateTimeInput = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
-    d.setMinutes(0);
-    return d.toISOString().slice(0, 16);
+    d.setMinutes(0, 0, 0);
+    return formatLocalDateTimeInput(d);
   });
   const [endDate, setEndDate] = useState(() => {
     const d = new Date(Date.now() + 24 * 3600 * 1000);
-    d.setMinutes(0);
-    return d.toISOString().slice(0, 16);
+    d.setMinutes(0, 0, 0);
+    return formatLocalDateTimeInput(d);
   });
 
   // Calendar month state
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
 
-  // Reload gardes & conversations for current pharmacy ONLY
-  const refreshPharmaData = () => {
+  // Reload gardes depuis Supabase `garde_planning` & conversations for current pharmacy ONLY
+  const refreshPharmaData = async () => {
     if (!currentPharma) return;
-    const gList = loadGardes(currentPharma.id);
+    const gList = await fetchGardes(currentPharma.id);
     setGardes(gList);
     const cList = loadConversations(currentPharma.id);
     setConversationsCount(cList.length);
@@ -206,12 +217,22 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
   };
 
   useEffect(() => {
-    refreshPharmaData();
+    if (!currentPharma?.id) return;
+    setGardes(loadGardes(currentPharma.id));
+    refreshPharmaData().catch(() => {});
   }, [currentPharma?.id]);
 
-  // AUTO ON/OFF Check according to programmed schedule
   useEffect(() => {
-    if (!currentPharma || !autoSync) return;
+    if (!currentPharma?.id) return;
+    const unsub = subscribeToStore(() => {
+      setGardes(loadGardes(currentPharma.id));
+    });
+    return () => unsub();
+  }, [currentPharma?.id]);
+
+  // AUTO ON/OFF Check according to programmed schedule in Supabase garde_planning
+  useEffect(() => {
+    if (!currentPharma || !autoSync || gardes.length === 0) return;
     const shouldBeOnline = isPharmacyCurrentlyOnDuty(currentPharma.id);
     if (shouldBeOnline !== currentPharma.is_online) {
       updatePharmacyStatus(currentPharma.id, shouldBeOnline);
@@ -228,30 +249,48 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
     onRefresh();
   };
 
-  // Add new garde
-  const handleCreateGarde = (e: React.FormEvent) => {
+  // Add new garde -> INSERT INTO garde_planning (Supabase)
+  const handleCreateGarde = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentPharma) return;
+    setGardeError(null);
+    setGardeFeedback(null);
 
     if (new Date(startDate) >= new Date(endDate)) {
-      alert('La date de fin doit être postérieure à la date de début.');
+      setGardeError('La date de fin doit être postérieure à la date de début.');
       return;
     }
 
-    addGarde({
-      pharmacie_id: currentPharma.id,
-      date_debut: new Date(startDate).toISOString(),
-      date_fin: new Date(endDate).toISOString(),
-    });
+    setIsSavingGarde(true);
+    try {
+      const res = await addGarde({
+        pharmacy_id: currentPharma.id,
+        pharmacie_id: currentPharma.id,
+        date_debut: new Date(startDate).toISOString(),
+        date_fin: new Date(endDate).toISOString(),
+        type_garde: typeGarde || '24h',
+      });
 
-    setShowAddModal(false);
-    refreshPharmaData();
-    onRefresh();
+      if (!res.garde) {
+        setGardeError(res.error || "Impossible d'enregistrer la garde dans Supabase.");
+        return;
+      }
+
+      setShowAddModal(false);
+      setGardeFeedback('Garde enregistrée en base Supabase (`garde_planning`).');
+      setTimeout(() => setGardeFeedback(null), 4000);
+      await refreshPharmaData();
+      fetchApprovedPharmacies().catch(() => {});
+      onRefresh();
+    } finally {
+      setIsSavingGarde(false);
+    }
   };
 
-  const handleDeleteGarde = (id: string) => {
-    deleteGarde(id);
-    refreshPharmaData();
+  const handleDeleteGarde = async (id: string) => {
+    await deleteGarde(id);
+    await refreshPharmaData();
+    fetchApprovedPharmacies().catch(() => {});
     onRefresh();
   };
 
@@ -682,10 +721,11 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                 <div
                   key={`day-${dayNum}`}
                   onClick={() => {
-                    const s = new Date(year, month, dayNum, 8, 0).toISOString().slice(0, 16);
-                    const e = new Date(year, month, dayNum + 1, 8, 0).toISOString().slice(0, 16);
+                    const s = formatLocalDateTimeInput(new Date(year, month, dayNum, 8, 0));
+                    const e = formatLocalDateTimeInput(new Date(year, month, dayNum + 1, 8, 0));
                     setStartDate(s);
                     setEndDate(e);
+                    setGardeError(null);
                     setShowAddModal(true);
                   }}
                   className={`h-14 sm:h-20 rounded-xl p-1.5 flex flex-col justify-between border cursor-pointer transition-all hover:scale-[1.02] ${
@@ -714,6 +754,12 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
               );
             })}
           </div>
+
+          {gardeFeedback && (
+            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold">
+              ✓ {gardeFeedback}
+            </div>
+          )}
 
           {/* Gardes list cards */}
           <div className="pt-4 border-t border-slate-800 space-y-3">
@@ -752,6 +798,11 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                           ) : (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-700 text-slate-300">
                               Programmé
+                            </span>
+                          )}
+                          {g.type_garde && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 uppercase">
+                              {g.type_garde}
                             </span>
                           )}
                         </div>
@@ -902,6 +953,26 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
               </div>
 
               <form onSubmit={handleCreateGarde} className="space-y-4 text-xs">
+                {gardeError && (
+                  <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/40 text-red-300 font-semibold">
+                    {gardeError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Type de garde :</label>
+                  <select
+                    value={typeGarde}
+                    onChange={(e) => setTypeGarde(e.target.value)}
+                    className="w-full h-12 bg-slate-800 text-white px-3 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-sm shadow-inner"
+                  >
+                    <option value="24h">Garde 24h</option>
+                    <option value="nuit">Garde de nuit</option>
+                    <option value="jour">Garde de jour</option>
+                    <option value="weekend">Garde Week-end</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-slate-300 mb-1 font-semibold">Date & Heure de début :</label>
                   <input
@@ -925,22 +996,26 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                 </div>
 
                 <div className="p-3 bg-slate-800/60 rounded-xl text-slate-400 border border-slate-700/60">
-                  Votre officine sera automatiquement affichée de garde en vert vif sur la carte publique pour les habitants de Lomé.
+                  Enregistrée dans Supabase (<code className="text-emerald-400">garde_planning</code>) — conservée même après vidage de cache ou changement d&apos;appareil.
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setShowAddModal(false)}
+                    onClick={() => {
+                      setGardeError(null);
+                      setShowAddModal(false);
+                    }}
                     className="min-h-[48px] px-4 py-3 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-750 font-bold"
                   >
                     Annuler
                   </button>
                   <button
                     type="submit"
-                    className="min-h-[48px] px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-600/30"
+                    disabled={isSavingGarde}
+                    className="min-h-[48px] px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-600/30 disabled:opacity-60 cursor-pointer"
                   >
-                    Enregistrer la Garde
+                    {isSavingGarde ? 'Enregistrement...' : 'Enregistrer la Garde'}
                   </button>
                 </div>
               </form>

@@ -34,7 +34,7 @@ let memoryClientsCount = 0;
 let memoryConversations: Conversation[] = [];
 const memoryMessages: Record<string, Message[]> = {};
 let memorySignalements: Signalement[] = [];
-const memoryGardes: Garde[] = [];
+let memoryGardes: Garde[] = [];
 let memoryPubs: Pub[] = [];
 let memoryStats: PharmacyDailyStat[] = [];
 const memoryValidatedCodes: Record<string, any> = {};
@@ -476,22 +476,97 @@ export function savePharmacies(list: Pharmacie[]) {
 }
 
 /**
+ * Lit `public.garde_planning` depuis Supabase :
+ * - activeIds : pharmacy_id dont `now() BETWEEN date_debut AND date_fin`
+ * - plannedIds : toutes les pharmacy_id ayant au moins une garde planifiée
+ */
+export async function fetchGardePlanningStatus(): Promise<{
+  activeIds: Set<string>;
+  plannedIds: Set<string>;
+  ok: boolean;
+}> {
+  const activeIds = new Set<string>();
+  const plannedIds = new Set<string>();
+  try {
+    const client = getSupabaseClient();
+    if (!client) return { activeIds, plannedIds, ok: false };
+
+    const nowIso = new Date().toISOString();
+    const [activeRes, allRes] = await Promise.all([
+      client
+        .from('garde_planning')
+        .select('pharmacy_id')
+        .lte('date_debut', nowIso)
+        .gte('date_fin', nowIso),
+      client.from('garde_planning').select('pharmacy_id'),
+    ]);
+
+    if (activeRes.error) {
+      console.warn('[EFA GARDE] SELECT garde_planning actif:', activeRes.error.message);
+      return { activeIds, plannedIds, ok: false };
+    }
+
+    if (Array.isArray(activeRes.data)) {
+      for (const row of activeRes.data as any[]) {
+        const pid = String(row.pharmacy_id || '');
+        if (pid) activeIds.add(pid);
+      }
+    }
+
+    if (!allRes.error && Array.isArray(allRes.data)) {
+      for (const row of allRes.data as any[]) {
+        const pid = String(row.pharmacy_id || '');
+        if (pid) plannedIds.add(pid);
+      }
+    }
+
+    return { activeIds, plannedIds, ok: true };
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchGardePlanningStatus error:', err);
+    return { activeIds, plannedIds, ok: false };
+  }
+}
+
+function applyGardePlanningToPharmacies(
+  list: Pharmacie[],
+  planning: { activeIds: Set<string>; plannedIds: Set<string>; ok: boolean }
+): Pharmacie[] {
+  if (!planning.ok) return list;
+  return list.map((p) => {
+    const hasActiveGarde = planning.activeIds.has(p.id);
+    const hasAnyPlanning = planning.plannedIds.has(p.id);
+    const isGarde = hasActiveGarde
+      ? true
+      : hasAnyPlanning
+      ? false
+      : Boolean(p.is_garde);
+    return {
+      ...p,
+      is_garde: isGarde,
+      is_online: isGarde,
+    };
+  });
+}
+
+/**
  * Charge TOUTES les pharmacies depuis Supabase (pour Super Admin)
  */
 export async function fetchPharmacies(): Promise<Pharmacie[]> {
   try {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client
-        .from('pharmacies')
-        .select('*');
+      const [{ data, error }, planning] = await Promise.all([
+        client.from('pharmacies').select('*'),
+        fetchGardePlanningStatus(),
+      ]);
 
       if (!error && data && Array.isArray(data)) {
         const clean = data
           .map(normalizePharmacyRow)
           .filter((p) => !isDemoPharmacy(p));
+        const withPlanning = applyGardePlanningToPharmacies(clean, planning);
         const enriched = applyAbonnementsToPharmacies(
-          clean,
+          withPlanning,
           memoryDemandesAbonnement
         );
         const sorted = sortPharmaciesPriority(enriched);
@@ -509,7 +584,7 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
 /**
  * CARTE PUBLIQUE : Lecture view_pharmacies_garde WHERE is_active=true
  * Fallback obligatoire : SELECT * FROM public.pharmacies WHERE is_active=true
- * Aucun filtre sur is_garde, is_verified, statut_validation ni latitude null.
+ * Statut DE GARDE calculé depuis Supabase `garde_planning` (now() BETWEEN date_debut AND date_fin).
  */
 export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
   try {
@@ -540,6 +615,8 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
       }
 
       if (!error && data && Array.isArray(data)) {
+        const planning = await fetchGardePlanningStatus();
+
         if (memoryDemandesAbonnement.length === 0) {
           const { data: abnData } = await client
             .from('abonnements')
@@ -572,8 +649,9 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
         const clean = data
           .map(normalizePharmacyRow)
           .filter((p) => !isDemoPharmacy(p) && p.is_active !== false);
+        const withPlanning = applyGardePlanningToPharmacies(clean, planning);
         const enriched = applyAbonnementsToPharmacies(
-          clean,
+          withPlanning,
           memoryDemandesAbonnement
         );
         const sorted = sortPharmaciesPriority(enriched);
@@ -2990,31 +3068,150 @@ export async function uploadMediaToSupabase(
 }
 
 /* ===============================
-   GARDES, PUBS & STATS
+   GARDES PERSISTANTES (`public.garde_planning` SUPABASE - ZERO LOCALSTORAGE)
    =============================== */
+
+function normalizeGardeRow(g: any): Garde {
+  const pid = String(g.pharmacy_id || g.pharmacie_id || '');
+  return {
+    id: String(g.id),
+    pharmacy_id: pid,
+    pharmacie_id: pid,
+    date_debut: g.date_debut,
+    date_fin: g.date_fin,
+    type_garde: g.type_garde || '24h',
+    created_at: g.created_at,
+  };
+}
 
 export function loadGardes(pharmacieId?: string): Garde[] {
   if (pharmacieId) {
-    return memoryGardes.filter((g) => g.pharmacie_id === pharmacieId);
+    return memoryGardes.filter(
+      (g) => g.pharmacy_id === pharmacieId || g.pharmacie_id === pharmacieId
+    );
   }
   return memoryGardes;
 }
 
-export function addGarde(garde: Omit<Garde, 'id'>): Garde {
-  const newGarde: Garde = {
-    ...garde,
-    id: 'garde-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-  };
-  memoryGardes.push(newGarde);
-  notifyChange();
-  return newGarde;
+export async function fetchGardes(pharmacyId?: string): Promise<Garde[]> {
+  try {
+    const client = getSupabaseClient();
+    if (!client) return loadGardes(pharmacyId);
+
+    let query = client
+      .from('garde_planning')
+      .select('*')
+      .order('date_debut', { ascending: true });
+
+    if (pharmacyId && isValidUuid(pharmacyId)) {
+      query = query.eq('pharmacy_id', pharmacyId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('[EFA GARDE] SELECT garde_planning error:', error.message);
+      return loadGardes(pharmacyId);
+    }
+
+    if (Array.isArray(data)) {
+      const normalized = data.map(normalizeGardeRow);
+      if (pharmacyId) {
+        const others = memoryGardes.filter(
+          (g) => g.pharmacy_id !== pharmacyId && g.pharmacie_id !== pharmacyId
+        );
+        memoryGardes = [...others, ...normalized];
+      } else {
+        memoryGardes = normalized;
+      }
+      notifyChange();
+      return normalized;
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchGardes error:', err);
+  }
+  return loadGardes(pharmacyId);
 }
 
-export function deleteGarde(id: string) {
-  const idx = memoryGardes.findIndex((g) => g.id === id);
-  if (idx !== -1) {
-    memoryGardes.splice(idx, 1);
+export async function addGarde(garde: {
+  pharmacy_id?: string;
+  pharmacie_id?: string;
+  date_debut: string;
+  date_fin: string;
+  type_garde?: string;
+}): Promise<{ garde: Garde | null; error?: string }> {
+  const pid = String(garde.pharmacy_id || garde.pharmacie_id || '');
+  const id = generateUuid();
+  const row = {
+    id,
+    pharmacy_id: pid,
+    date_debut: garde.date_debut,
+    date_fin: garde.date_fin,
+    type_garde: garde.type_garde || '24h',
+  };
+
+  try {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { garde: null, error: 'Client Supabase non initialisé.' };
+    }
+
+    const { data, error } = await client
+      .from('garde_planning')
+      .insert([row])
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[EFA GARDE] INSERT garde_planning error:', error.message);
+      return { garde: null, error: error.message };
+    }
+
+    const saved = normalizeGardeRow(data || row);
+    memoryGardes = [...memoryGardes.filter((g) => g.id !== saved.id), saved];
+
+    // Met à jour is_garde en base si la plage englobe maintenant
+    const nowMs = Date.now();
+    const sMs = new Date(saved.date_debut).getTime();
+    const eMs = new Date(saved.date_fin).getTime();
+    if (nowMs >= sMs && nowMs <= eMs && isValidUuid(pid)) {
+      updatePharmacyStatus(pid, true);
+    }
+
     notifyChange();
+    return { garde: saved };
+  } catch (err: any) {
+    console.error('[EFA GARDE] addGarde exception:', err);
+    return { garde: null, error: err?.message || 'Erreur insertion garde' };
+  }
+}
+
+export async function deleteGarde(id: string): Promise<boolean> {
+  const existing = memoryGardes.find((g) => g.id === id);
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { error } = await client
+        .from('garde_planning')
+        .delete()
+        .eq('id', id);
+      if (error) {
+        console.error('[EFA GARDE] DELETE garde_planning error:', error.message);
+        return false;
+      }
+    }
+    memoryGardes = memoryGardes.filter((g) => g.id !== id);
+    if (existing) {
+      const pid = existing.pharmacy_id || existing.pharmacie_id || '';
+      if (pid && isValidUuid(pid)) {
+        const stillOnDuty = isPharmacyCurrentlyOnDuty(pid);
+        updatePharmacyStatus(pid, stillOnDuty);
+      }
+    }
+    notifyChange();
+    return true;
+  } catch (err) {
+    console.error('[EFA GARDE] deleteGarde exception:', err);
+    return false;
   }
 }
 
@@ -3230,6 +3427,7 @@ function startBackgroundPolling(): void {
   if (pollingInterval || typeof window === 'undefined') return;
   pollingInterval = setInterval(() => {
     fetchApprovedPharmacies().catch(() => {});
+    fetchGardes().catch(() => {});
     fetchClientsCount().catch(() => {});
     fetchDemandesAbonnement().catch(() => {});
     fetchConversations().catch(() => {});
@@ -3348,6 +3546,15 @@ export function initSupabaseRealtime(): void {
         () => {
           notifyChange();
         }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'garde_planning' },
+        () => {
+          fetchGardes().catch(() => {});
+          fetchApprovedPharmacies().catch(() => {});
+          notifyChange();
+        }
       );
 
     channel.subscribe((status, err) => {
@@ -3404,6 +3611,7 @@ export async function bootstrapStoreFromSupabase(
 
   const selectQueries = Promise.allSettled([
     fetchApprovedPharmacies(),
+    fetchGardes(),
     fetchPendingPharmacies(),
     fetchDemandesAbonnement(),
     fetchClientsCount(),
