@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Pharmacie } from '../types';
 import { PharmacyMap } from '../components/PharmacyMap';
 import { PharmacyCard } from '../components/PharmacyCard';
-import { trackItineraryClick, recordClientContact, fetchPharmacies } from '../services/store';
+import { trackItineraryClick, recordClientContact, fetchApprovedPharmacies, fetchDemandesAbonnement } from '../services/store';
 import {
   get3ClosestPharmacies,
   getDistance,
@@ -157,10 +157,11 @@ export const Map: React.FC<MapProps> = ({
     );
   };
 
-  // Sync pharmacies from Supabase with official privileges ordering
+  // Sync pharmacies from view_pharmacies_garde (is_active=true) & abonnements
   useEffect(() => {
-    fetchPharmacies().catch((err) =>
-      console.warn('Map initial fetchPharmacies fallback:', err)
+    fetchDemandesAbonnement().catch(() => {});
+    fetchApprovedPharmacies().catch((err) =>
+      console.warn('Map initial fetchApprovedPharmacies fallback:', err)
     );
   }, []);
 

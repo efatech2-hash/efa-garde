@@ -50,7 +50,21 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
 
     mapInstanceRef.current = map;
 
+    const resizeTimer = setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && mapContainerRef.current) {
+      observer = new ResizeObserver(() => {
+        map.invalidateSize();
+      });
+      observer.observe(mapContainerRef.current);
+    }
+
     return () => {
+      clearTimeout(resizeTimer);
+      observer?.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -70,13 +84,19 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
     });
 
     pharmacies.forEach((p) => {
-      // Coordonnées sécurisées sur terre à Lomé
-      let lat = p.lat;
-      let lng = p.lng;
-      if (!lat || !lng || isNaN(lat) || isNaN(lng) || lat < 6.12) {
-        lat = LOME_CENTER.lat;
-        lng = LOME_CENTER.lng;
-      }
+      // Position : lat ?? latitude , lng ?? longitude (ne jamais filtrer si latitude null)
+      const rawLat: unknown = p.lat ?? p.latitude;
+      const rawLng: unknown = p.lng ?? p.longitude;
+      const parsedLat =
+        rawLat !== null && rawLat !== undefined && rawLat !== ''
+          ? Number(rawLat)
+          : NaN;
+      const parsedLng =
+        rawLng !== null && rawLng !== undefined && rawLng !== ''
+          ? Number(rawLng)
+          : NaN;
+      const lat = Number.isFinite(parsedLat) ? parsedLat : LOME_CENTER.lat;
+      const lng = Number.isFinite(parsedLng) ? parsedLng : LOME_CENTER.lng;
 
       // Calcul distance si utilisateur géolocalisé
       let distanceText = '';
@@ -85,18 +105,33 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
         distanceText = ` • ${formatDistanceShort(d)}`;
       }
 
-      // Règles visuelles
+      // Règles visuelles par abonnement (sans modifier is_garde)
       const isPending = Boolean(p.is_pending);
-      const isPopulaire = !isPending && Boolean(
-        p.is_premium ||
+      const planStr = String(p.plan || '').toLowerCase();
+      const isStarYellow =
+        !isPending &&
+        Boolean(
           p.etoile_doree ||
-          p.plan === 'populaire_mensuel' ||
-          p.plan === 'populaire_annuel'
-      );
-      const isPaidAndOnline = !isPending && (isPopulaire || p.plan === '60k' || p.plan === 'top') && p.is_online;
-      const isTop = !isPending && p.plan === 'top';
+            p.is_premium ||
+            planStr === 'populaire_mensuel' ||
+            planStr === 'populaire_annuel' ||
+            planStr.includes('star')
+        );
+      const isPaidGreen =
+        !isPending &&
+        !isStarYellow &&
+        Boolean(
+          p.subscription_status === 'active' ||
+            p.is_registered ||
+            planStr === 'register' ||
+            planStr === 'annual' ||
+            planStr === '60k' ||
+            planStr === 'top' ||
+            planStr.includes('enregistrement') ||
+            planStr.includes('annuel')
+        );
 
-      let bgClass = 'bg-slate-500 border-slate-400 text-slate-200';
+      let bgClass = 'bg-slate-600 border-slate-400 text-slate-200';
       let ringHtml = '';
 
       if (isPending) {
@@ -107,30 +142,24 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
             ⏳
           </span>
         `;
-      } else if (isPopulaire) {
-        // PIN GOLD POPULAIRE PRIVILÈGE
-        bgClass = 'bg-gradient-to-tr from-amber-500 to-yellow-400 border-yellow-100 text-slate-950 shadow-xl shadow-amber-500/50';
+      } else if (isStarYellow) {
+        // JAUNE BRILLANT + etoile_doree=true (star_mensuel + paye_valide)
+        bgClass =
+          'bg-gradient-to-tr from-yellow-400 via-amber-300 to-yellow-500 border-yellow-100 text-slate-950 shadow-xl shadow-yellow-400/70';
         ringHtml = `
           <span class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-yellow-300 text-slate-950 font-black rounded-full flex items-center justify-center text-[11px] shadow border border-white">
             ⭐
           </span>
-          <span class="absolute -inset-1.5 rounded-full bg-amber-400/40 marker-pulse -z-10"></span>
+          <span class="absolute -inset-1.5 rounded-full bg-yellow-400/50 marker-pulse -z-10"></span>
         `;
-      } else if (isPaidAndOnline) {
-        if (isTop) {
-          bgClass = 'bg-emerald-600 border-amber-400 text-white shadow-lg shadow-emerald-500/50';
-          ringHtml = `
-            <span class="absolute -top-1 -right-1 w-5 h-5 bg-amber-400 text-slate-900 font-black rounded-full flex items-center justify-center text-[10px] shadow border border-white">
-              ★
-            </span>
-            <span class="absolute -inset-1 rounded-full bg-emerald-400/40 marker-pulse -z-10"></span>
-          `;
-        } else {
-          bgClass = 'bg-emerald-500 border-emerald-300 text-white shadow-md shadow-emerald-500/40';
-          ringHtml = `<span class="absolute -inset-1 rounded-full bg-emerald-400/30 marker-pulse -z-10"></span>`;
-        }
+      } else if (isPaidGreen) {
+        // VERT (enregistrement_25k / annuel + paye_valide)
+        bgClass =
+          'bg-emerald-500 border-emerald-300 text-white shadow-lg shadow-emerald-500/50';
+        ringHtml = `<span class="absolute -inset-1 rounded-full bg-emerald-400/35 marker-pulse -z-10"></span>`;
       } else {
-        bgClass = 'bg-slate-600 border-slate-500 text-slate-300 opacity-90';
+        // GRIS (sans abonnement)
+        bgClass = 'bg-slate-600 border-slate-400 text-slate-200 opacity-95';
       }
 
       const labelContent = isPending
@@ -171,6 +200,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
         marker.setIcon(customIcon);
       }
     });
+    map.invalidateSize();
   }, [pharmacies, onSelectPharmacy, userPosition]);
 
   // Update user position marker (Point BLEU "Vous êtes ici" comme Uber) + Lignes pointillées vers les 3 plus proches
@@ -212,9 +242,18 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
       }
 
       // Tracer une petite ligne pointillée entre l'utilisateur et les 3 pharmacies les plus proches
-      const validPharmacies = pharmacies.filter(
-        (p) => p.lat && p.lng && !isNaN(p.lat) && !isNaN(p.lng)
-      );
+      const validPharmacies = pharmacies
+        .map((p) => {
+          const rLat: unknown = p.lat ?? p.latitude;
+          const rLng: unknown = p.lng ?? p.longitude;
+          const pLat = rLat !== null && rLat !== undefined && rLat !== '' ? Number(rLat) : NaN;
+          const pLng = rLng !== null && rLng !== undefined && rLng !== '' ? Number(rLng) : NaN;
+          return {
+            ...p,
+            lat: Number.isFinite(pLat) ? pLat : LOME_CENTER.lat,
+            lng: Number.isFinite(pLng) ? pLng : LOME_CENTER.lng,
+          };
+        });
 
       const closest3 = validPharmacies
         .map((p) => ({
@@ -250,14 +289,16 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !selectedPharmacy) return;
-    map.flyTo([selectedPharmacy.lat, selectedPharmacy.lng], 15, {
+    const sLat = selectedPharmacy.lat ?? selectedPharmacy.latitude ?? LOME_CENTER.lat;
+    const sLng = selectedPharmacy.lng ?? selectedPharmacy.longitude ?? LOME_CENTER.lng;
+    map.flyTo([sLat, sLng], 15, {
       duration: 1.2,
     });
   }, [selectedPharmacy]);
 
   return (
     <div className="relative w-full h-full min-h-[380px] rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
-      <div ref={mapContainerRef} className="w-full h-full" />
+      <div ref={mapContainerRef} className="w-full h-full min-h-[380px]" />
 
       {/* Petit bouton en bas à gauche de la carte : © OSM Gratuit */}
       <div className="absolute bottom-3 left-3 z-[400] pointer-events-auto">

@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
-import { Pharmacie, PlanType } from '../types';
-import { updatePharmacyPlan } from '../services/store';
-import { supabase } from '../lib/supabase';
+import React, { useState, useEffect } from 'react';
+import { Pharmacie, Abonnement } from '../types';
+import { fetchAbonnements, updatePharmacyPlan } from '../services/store';
 import { SubscriptionCountdown } from '../components/SubscriptionCountdown';
 import {
   Star,
@@ -9,11 +8,7 @@ import {
   Zap,
   ShieldCheck,
   Smartphone,
-  CheckCircle2,
-  AlertCircle,
   Building2,
-  CalendarCheck,
-  CheckSquare
 } from 'lucide-react';
 
 interface SubscriptionPageProps {
@@ -23,33 +18,36 @@ interface SubscriptionPageProps {
   onRefresh: () => void;
 }
 
-interface SelectedPlanInfo {
-  type: PlanType;
-  title: string;
-  amount: string;
-  amountNumber: number;
-}
-
 export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
   pharmacies,
   activePharmaId,
   onRefresh,
 }) => {
-  const currentPharma = pharmacies.find((p) => p.id === activePharmaId) || pharmacies[0];
+  const safePharmacies = Array.isArray(pharmacies) ? pharmacies : [];
+  const currentPharma =
+    safePharmacies.find((p) => p.id === activePharmaId) || safePharmacies[0] || null;
+  const currentPlan = currentPharma?.plan || 'free';
+  const pharmaName = currentPharma?.nom || 'Ma Pharmacie';
 
   // Sub-choice for Card 2 (Monthly 15.000 FCFA vs Annual 140.000 FCFA)
   const [starCycle, setStarCycle] = useState<'month' | 'year'>('month');
+  const [abonnements, setAbonnements] = useState<Abonnement[]>([]);
 
-  // Redirection directe WhatsApp wa.me/22896100972
-  const handlePayWhatsApp = (formule: string) => {
-    const pharmaName = currentPharma?.nom || 'ma pharmacie';
-    const message = `Bonjour EFA TECH, je souhaite payer l'abonnement ${formule} pour ${pharmaName}`;
-    const whatsappNum = (
-      import.meta.env.VITE_WHATSAPP_NUMBER ||
-      '22896100972'
-    ).replace(/[^0-9]/g, '');
-    const url = `https://wa.me/${whatsappNum}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
+  useEffect(() => {
+    fetchAbonnements(currentPharma?.id)
+      .then((list) => setAbonnements(Array.isArray(list) ? list : []))
+      .catch(() => setAbonnements([]));
+  }, [currentPharma?.id]);
+
+  // Redirection directe WhatsApp wa.me/[NUMERO_ADMIN]?text=Je veux [NOM PLAN] pour [NOM PHARMACIE]
+  const whatsappNum = (
+    import.meta.env.VITE_WHATSAPP_NUMBER ||
+    '22896100972'
+  ).replace(/[^0-9]/g, '');
+
+  const getWhatsAppUrl = (nomPlan: string) => {
+    const message = `Je veux ${nomPlan} pour ${pharmaName}`;
+    return `https://wa.me/${whatsappNum}?text=${encodeURIComponent(message)}`;
   };
 
   return (
@@ -67,11 +65,16 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
         </p>
 
         {/* Auto-synced Pharmacy Badge */}
-        <div className="pt-2 flex items-center justify-center gap-2">
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
           <span className="text-xs text-slate-400 font-medium">Officine :</span>
           <span className="bg-slate-800 text-emerald-400 text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-700">
-            {currentPharma?.nom} (Plan actuel : {currentPharma?.plan.toUpperCase()})
+            {pharmaName} (Plan actuel : {currentPlan.toUpperCase()})
           </span>
+          {abonnements.length === 0 && (
+            <span className="text-[11px] text-slate-400">
+              Aucun abonnement enregistré pour le moment
+            </span>
+          )}
         </div>
       </div>
 
@@ -110,7 +113,7 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
             </div>
 
             <p className="text-xs text-slate-300 mb-6 leading-relaxed">
-              Activez la visibilité prioritaire de <strong className="text-white">{currentPharma?.nom}</strong> sur Lomé. Accès direct aux patients en détresse, chat live illimité et statut de garde garanti.
+              Activez la visibilité prioritaire de <strong className="text-white">{pharmaName}</strong> sur Lomé. Accès direct aux patients en détresse, chat live illimité et statut de garde garanti.
             </p>
 
             <ul className="space-y-2.5 text-xs text-slate-200 mb-6">
@@ -142,13 +145,15 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
           </div>
 
           <div className="pt-2">
-            <button
-              onClick={() => handlePayWhatsApp('Enregistrement Officine Lomé 25.000 FCFA')}
+            <a
+              href={getWhatsAppUrl('Officine Lome 25000')}
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full py-3.5 px-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-xl shadow-blue-600/30 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2 text-center"
             >
               <Smartphone className="w-4 h-4 shrink-0" />
               <span>Payer par T-Money / Flooz / Moov</span>
-            </button>
+            </a>
           </div>
         </div>
 
@@ -243,17 +248,19 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
           </div>
 
           <div className="space-y-2 pt-1">
-            <button
-              onClick={() =>
-                handlePayWhatsApp(
-                  `Plan Star Mensuel ${starCycle === 'month' ? '15.000 FCFA/mois' : '140.000 FCFA/an'}`
-                )
-              }
+            <a
+              href={getWhatsAppUrl(
+                starCycle === 'month'
+                  ? 'Star Mensuel 15000/mois'
+                  : 'Star Annuel 140000/an'
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full py-3.5 px-3 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs sm:text-sm shadow-xl shadow-amber-500/30 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2 text-center"
             >
               <Smartphone className="w-4 h-4 shrink-0" />
               <span>Payer par T-Money / Flooz / Moov</span>
-            </button>
+            </a>
           </div>
         </div>
 
@@ -312,13 +319,15 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
           </div>
 
           <div className="space-y-2 pt-1">
-            <button
-              onClick={() => handlePayWhatsApp('Plan Annuel Officine 90.000 FCFA/an')}
+            <a
+              href={getWhatsAppUrl('Annuel 90000/an')}
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full py-3.5 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs sm:text-sm shadow-xl shadow-emerald-600/30 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2 text-center"
             >
               <Smartphone className="w-4 h-4 shrink-0" />
               <span>Payer par T-Money / Flooz / Moov</span>
-            </button>
+            </a>
           </div>
         </div>
 
@@ -371,22 +380,28 @@ export const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
             </ul>
           </div>
 
-          <div className="pt-2">
-            {currentPharma.plan === 'free' ? (
-              <div className="w-full py-3.5 rounded-2xl bg-slate-800 text-slate-400 font-semibold text-center text-xs border border-slate-700">
-                Plan Basique Actuel
-              </div>
-            ) : (
+          <div className="pt-2 space-y-2">
+            {currentPharma && currentPlan !== 'free' && (
               <button
+                type="button"
                 onClick={() => {
                   updatePharmacyPlan(currentPharma.id, 'free');
                   onRefresh();
                 }}
-                className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors"
+                className="w-full py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
               >
                 Rétrograder au Plan Gratuit
               </button>
             )}
+            <a
+              href={getWhatsAppUrl('Gratuit 0')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-3.5 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm border border-slate-700 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2 text-center"
+            >
+              <Smartphone className="w-4 h-4 shrink-0" />
+              <span>Activer via WhatsApp</span>
+            </a>
           </div>
         </div>
       </div>

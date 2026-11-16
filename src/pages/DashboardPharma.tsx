@@ -609,7 +609,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
                 );
                 onRefresh();
               }}
-              onNavigateToPlans={() => onNavigate('abonnement')}
+              onNavigateToPlans={() => onNavigate('abonnements')}
             />
           </div>
         </div>

@@ -16,6 +16,7 @@ import {
   loadDemandesAbonnement,
   fetchDemandesAbonnement,
   validateSubscriptionPaymentAndGenerateCode,
+  rejectSubscriptionPayment,
   loadPendingPharmacies,
   fetchPendingPharmacies,
   approvePharmacySuperAdmin,
@@ -327,12 +328,24 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     onNavigateToLogin();
   };
 
-  // Action : Valider Paiement 25k & Générer code 4 chiffres pour le pharmacien
+  // Action : Valider Paiement & Activer pharmacie + Générer code 4 chiffres
   const handleValidatePaymentAndGenerateCode = async (demande: DemandeAbonnement) => {
-    const res = await validateSubscriptionPaymentAndGenerateCode(demande.id);
+    const res = await validateSubscriptionPaymentAndGenerateCode(
+      demande.id,
+      undefined,
+      demande
+    );
     setGeneratedCodes((prev) => ({ ...prev, [demande.id]: res.code }));
+    await Promise.all([refreshDemandes(), fetchPharmacies()]);
+    setPharmacies(loadPharmacies());
+    showToast(`✅ Activé ! "${demande.nom_pharmacie}" (Code : ${res.code})`);
+  };
+
+  // Action : Refuser une demande d'abonnement
+  const handleRejectPayment = async (demande: DemandeAbonnement) => {
+    await rejectSubscriptionPayment(demande.id);
     await refreshDemandes();
-    showToast(`✅ Paiement validé pour "${demande.nom_pharmacie}" ! Code généré : ${res.code}`);
+    showToast(`❌ Abonnement refusé pour "${demande.nom_pharmacie}"`);
   };
 
   // Action : Valider l'inscription d'une pharmacie soumise ("Quelqu'un a souscrit")
@@ -980,6 +993,10 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                                 <span className="inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
                                   En attente paiement
                                 </span>
+                              ) : d.statut === 'rejete' ? (
+                                <span className="inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-500/20 text-red-300 border border-red-500/40">
+                                  Refusé
+                                </span>
                               ) : (
                                 <div className="space-y-1">
                                   <span className="inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
@@ -996,33 +1013,32 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                             </td>
                             <td className="py-3.5 px-4 text-right">
                               <div className="flex items-center justify-end gap-2 flex-wrap">
-                                {isEnAttente ? (
-                                  <button
-                                    onClick={() => handleValidatePaymentAndGenerateCode(d)}
-                                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+                                <button
+                                  type="button"
+                                  onClick={() => handleValidatePaymentAndGenerateCode(d)}
+                                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition-all cursor-pointer shadow-md flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>{isEnAttente ? 'Valider' : 'Revalider'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectPayment(d)}
+                                  className="px-3 py-2 rounded-xl bg-red-950/70 hover:bg-red-900 text-red-200 border border-red-500/40 font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Refuser</span>
+                                </button>
+                                {!isEnAttente && currentCode && (
+                                  <a
+                                    href={waLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs"
                                   >
-                                    <KeyRound className="w-3.5 h-3.5" />
-                                    <span>Valider paiement & Générer code</span>
-                                  </button>
-                                ) : (
-                                  <>
-                                    <a
-                                      href={waLink}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs"
-                                    >
-                                      <Send className="w-3.5 h-3.5 text-emerald-400" />
-                                      <span>Envoyer code par WhatsApp</span>
-                                    </a>
-                                    <button
-                                      onClick={() => handleValidatePaymentAndGenerateCode(d)}
-                                      className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold cursor-pointer"
-                                      title="Régénérer un nouveau code 4 chiffres"
-                                    >
-                                      Régénérer
-                                    </button>
-                                  </>
+                                    <Send className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>WhatsApp Code</span>
+                                  </a>
                                 )}
                               </div>
                             </td>

@@ -333,10 +333,11 @@ export const SubscriptionCountdown: React.FC<SubscriptionCountdownProps> = ({
 
         {onNavigateToPlans && (
           <button
+            type="button"
             onClick={onNavigateToPlans}
-            className="w-full min-h-[42px] py-2.5 px-3 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer text-center"
+            className="w-full min-h-[42px] py-2.5 px-3 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer text-center"
           >
-            <span>Consulter les formules d'abonnement</span>
+            <span>Voir Abonnements</span>
             <ArrowRight className="w-3.5 h-3.5 shrink-0" />
           </button>
         )}

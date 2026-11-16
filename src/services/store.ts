@@ -325,17 +325,51 @@ function generateUuid(): string {
   });
 }
 
+function parseCoord(val: unknown, fallback: number): number {
+  if (val === null || val === undefined || val === '') return fallback;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function isStarPlanName(plan?: string | null): boolean {
+  if (!plan) return false;
+  const p = plan.toLowerCase();
+  return (
+    p.includes('star') ||
+    p.includes('populaire') ||
+    p === 'top' ||
+    p === 'premium'
+  );
+}
+
+function isPaidGreenPlanName(plan?: string | null): boolean {
+  if (!plan) return false;
+  const p = plan.toLowerCase();
+  return (
+    p.includes('enregistrement') ||
+    p.includes('25k') ||
+    p.includes('annuel') ||
+    p.includes('annual') ||
+    p.includes('90k') ||
+    p.includes('60k') ||
+    p === 'register' ||
+    p === 'basic'
+  );
+}
+
 function normalizePharmacyRow(p: any): Pharmacie {
   const isGarde = Boolean(p.is_garde ?? p.is_online);
   const phone = String(p.phone || p.tel || '');
+  const lat = parseCoord(p.lat ?? p.latitude, 6.1319);
+  const lng = parseCoord(p.lng ?? p.longitude, 1.2228);
   return {
     ...p,
     tel: phone,
     phone,
     adresse: p.adresse || '',
     quartier: p.quartier || 'Lomé',
-    lat: Number(p.lat) || 6.1319,
-    lng: Number(p.lng) || 1.2228,
+    lat,
+    lng,
     plan: p.plan || 'free',
     is_garde: isGarde,
     is_online: isGarde,
@@ -343,6 +377,80 @@ function normalizePharmacyRow(p: any): Pharmacie {
     is_active: p.is_active !== false,
     is_pending: Boolean(p.is_pending),
   };
+}
+
+function applyAbonnementsToPharmacies(
+  list: Pharmacie[],
+  abns: DemandeAbonnement[]
+): Pharmacie[] {
+  if (!Array.isArray(abns) || abns.length === 0) return list;
+
+  const nowMs = Date.now();
+  const validAbns = abns.filter((a) => {
+    const st = (a.statut || '').toLowerCase();
+    const isPaid = st === 'paye_valide' || st === 'active' || st === 'actif';
+    if (!isPaid) return false;
+    if (a.expire_le) {
+      const expMs = new Date(a.expire_le).getTime();
+      if (Number.isFinite(expMs) && expMs < nowMs) return false;
+    }
+    return true;
+  });
+
+  if (validAbns.length === 0) return list;
+
+  return list.map((p) => {
+    const cleanName = (p.nom || '').trim().toLowerCase();
+    const matches = validAbns.filter((a) => {
+      const abnPharmaId = a.pharmacy_id || a.pharmacie_id;
+      if (abnPharmaId && p.id && abnPharmaId === p.id) return true;
+      const abnNom = (a.nom_pharmacie || '').trim().toLowerCase();
+      if (abnNom && cleanName && abnNom === cleanName) return true;
+      return false;
+    });
+
+    if (matches.length === 0) return p;
+
+    const starMatch = matches.find((a) => isStarPlanName(a.plan));
+    if (starMatch) {
+      return {
+        ...p,
+        plan: starMatch.plan?.toLowerCase().includes('annuel')
+          ? 'populaire_annuel'
+          : 'populaire_mensuel',
+        etoile_doree: true,
+        is_premium: true,
+        subscription_plan: 'premium',
+        subscription_status: 'active',
+        subscription_end_at: starMatch.expire_le || p.subscription_end_at,
+      };
+    }
+
+    const greenMatch = matches.find(
+      (a) => isPaidGreenPlanName(a.plan) || !a.plan
+    );
+    if (greenMatch) {
+      const lowerPlan = (greenMatch.plan || '').toLowerCase();
+      return {
+        ...p,
+        plan:
+          lowerPlan.includes('annuel') ||
+          lowerPlan.includes('annual') ||
+          lowerPlan.includes('90') ||
+          lowerPlan.includes('60')
+            ? 'annual'
+            : p.plan && p.plan !== 'free'
+            ? p.plan
+            : 'register',
+        is_registered: true,
+        subscription_plan: p.subscription_plan || 'basic',
+        subscription_status: 'active',
+        subscription_end_at: greenMatch.expire_le || p.subscription_end_at,
+      };
+    }
+
+    return p;
+  });
 }
 
 export function loadPharmacies(): Pharmacie[] {
@@ -377,7 +485,11 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
         const clean = data
           .map(normalizePharmacyRow)
           .filter((p) => !isDemoPharmacy(p));
-        const sorted = sortPharmaciesPriority(clean);
+        const enriched = applyAbonnementsToPharmacies(
+          clean,
+          memoryDemandesAbonnement
+        );
+        const sorted = sortPharmaciesPriority(enriched);
         memoryPharmacies = sorted;
         notifyChange();
         return sorted;
@@ -390,8 +502,8 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
 }
 
 /**
- * CARTE PUBLIQUE : SELECT * FROM public.view_pharmacies_garde (is_active=true)
- * Ne bloque pas sur is_verified=true ni sur is_garde=true.
+ * CARTE PUBLIQUE : SELECT * FROM public.view_pharmacies_garde WHERE is_active=true
+ * Ne bloque pas sur is_verified=true, is_garde=true ni latitude=null.
  */
 export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
   try {
@@ -399,7 +511,8 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
     if (client) {
       let { data, error } = await client
         .from('view_pharmacies_garde')
-        .select('*');
+        .select('*')
+        .eq('is_active', true);
 
       if (error || !Array.isArray(data)) {
         const fallbackRes = await client
@@ -411,10 +524,43 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
       }
 
       if (!error && data && Array.isArray(data)) {
+        if (memoryDemandesAbonnement.length === 0) {
+          const { data: abnData } = await client
+            .from('abonnements')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (Array.isArray(abnData)) {
+            memoryDemandesAbonnement = abnData.map((d: any) => ({
+              id: d.id,
+              nom_pharmacie: d.nom_pharmacie || d.pharmacie_nom || 'Pharmacie',
+              telephone: d.telephone || d.phone || '',
+              email: d.email,
+              montant: Number(d.montant) || 25000,
+              plan: d.plan || 'enregistrement_25k',
+              statut:
+                d.statut === 'paye_valide' ||
+                d.statut === 'active' ||
+                d.statut === 'actif'
+                  ? 'paye_valide'
+                  : d.statut || 'en_attente',
+              code_validation: d.code_validation,
+              created_at: d.created_at || new Date().toISOString(),
+              validated_at: d.validated_at,
+              pharmacy_id: d.pharmacy_id || d.pharmacie_id,
+              pharmacie_id: d.pharmacy_id || d.pharmacie_id,
+              expire_le: d.expire_le,
+            }));
+          }
+        }
+
         const clean = data
           .map(normalizePharmacyRow)
           .filter((p) => !isDemoPharmacy(p) && p.is_active !== false);
-        const sorted = sortPharmaciesPriority(clean);
+        const enriched = applyAbonnementsToPharmacies(
+          clean,
+          memoryDemandesAbonnement
+        );
+        const sorted = sortPharmaciesPriority(enriched);
 
         // Préserve les inactives déjà en mémoire pour l'admin
         const inactiveOrOther = memoryPharmacies.filter((p) => p.is_active === false);
@@ -1353,15 +1499,24 @@ export async function fetchDemandesAbonnement(): Promise<DemandeAbonnement[]> {
           montant: Number(d.montant) || 25000,
           plan: d.plan || 'enregistrement_25k',
           statut:
-            d.statut === 'paye_valide' || d.statut === 'active'
+            d.statut === 'paye_valide' ||
+            d.statut === 'active' ||
+            d.statut === 'actif'
               ? 'paye_valide'
               : d.statut || 'en_attente',
           code_validation: d.code_validation,
           created_at: d.created_at || new Date().toISOString(),
           validated_at: d.validated_at,
+          pharmacy_id: d.pharmacy_id || d.pharmacie_id,
           pharmacie_id: d.pharmacy_id || d.pharmacie_id,
+          expire_le: d.expire_le,
         }));
         memoryDemandesAbonnement = mapped;
+        if (memoryPharmacies.length > 0) {
+          memoryPharmacies = sortPharmaciesPriority(
+            applyAbonnementsToPharmacies(memoryPharmacies, mapped)
+          );
+        }
         notifyChange();
         return mapped;
       }
@@ -1484,21 +1639,38 @@ export async function createSubscriptionPaymentRequest(data: {
 }
 
 /**
- * GÉNÉRER CODE 4 CHIFFRES (Super Admin) :
- * UPDATE public.abonnements SET code_validation, statut='paye_valide'
+ * VALIDER ABONNEMENT & GÉNÉRER CODE 4 CHIFFRES (Super Admin) :
+ * - UPDATE abonnements SET statut='paye_valide', expire_le=now()+interval WHERE id=[id]
+ * - UPDATE pharmacies SET is_active=true WHERE id=pharmacie_id (si null, match nom_pharmacie=pharmacies.nom)
+ * - Ne modifie jamais is_garde.
  */
 export async function validateSubscriptionPaymentAndGenerateCode(
   demandeId: string,
-  customCode?: string
+  customCode?: string,
+  demandeObj?: DemandeAbonnement
 ): Promise<{ code: string; demande: DemandeAbonnement | null }> {
   const code = customCode || Math.floor(1000 + Math.random() * 9000).toString();
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
 
-  const found = memoryDemandesAbonnement.find((d) => d.id === demandeId);
+  const found =
+    memoryDemandesAbonnement.find((d) => d.id === demandeId) || demandeObj;
+
+  const planStr = (found?.plan || '').toLowerCase();
+  const isMonthly =
+    planStr.includes('mensuel') ||
+    planStr.includes('star_mensuel') ||
+    Number(found?.montant) === 15000;
+  const intervalDays = isMonthly ? 30 : 365;
+  const expireLe = new Date(
+    nowDate.getTime() + intervalDays * 24 * 3600 * 1000
+  ).toISOString();
+
   if (found) {
     found.statut = 'paye_valide';
     found.code_validation = code;
     found.validated_at = now;
+    found.expire_le = expireLe;
   }
   memoryValidatedCodes[code] = {
     demandeId,
@@ -1507,18 +1679,96 @@ export async function validateSubscriptionPaymentAndGenerateCode(
     validated_at: now,
   };
 
-  // Synchronisation Supabase table abonnements
+  // Synchronisation Supabase table abonnements + pharmacies
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      await sb
+      // 1) Récupère la ligne d'abonnement exacte en DB si possible
+      const { data: abnRow } = await sb
         .from('abonnements')
-        .update({
-          statut: 'paye_valide',
-          code_validation: code,
-          updated_at: now,
-        })
+        .select('*')
+        .eq('id', demandeId)
+        .maybeSingle();
+
+      let targetPharmaId: string | null = null;
+      const rawPid =
+        abnRow?.pharmacy_id ||
+        abnRow?.pharmacie_id ||
+        found?.pharmacy_id ||
+        found?.pharmacie_id;
+      if (isValidUuid(rawPid)) {
+        targetPharmaId = rawPid;
+      }
+
+      const targetNom = (
+        abnRow?.nom_pharmacie ||
+        found?.nom_pharmacie ||
+        ''
+      ).trim();
+
+      // Si pharmacie_id null, match nom_pharmacie = pharmacies.nom
+      if (!targetPharmaId && targetNom) {
+        const { data: matchedByExact } = await sb
+          .from('pharmacies')
+          .select('id, nom')
+          .ilike('nom', targetNom)
+          .limit(1)
+          .maybeSingle();
+        if (matchedByExact?.id && isValidUuid(matchedByExact.id)) {
+          targetPharmaId = matchedByExact.id;
+        }
+      }
+
+      // 2) UPDATE abonnements SET statut='paye_valide', expire_le=now()+interval WHERE id=[id]
+      const abnUpdatePayload: Record<string, any> = {
+        statut: 'paye_valide',
+        code_validation: code,
+        expire_le: expireLe,
+        updated_at: now,
+      };
+      if (targetPharmaId) {
+        abnUpdatePayload.pharmacy_id = targetPharmaId;
+        abnUpdatePayload.pharmacie_id = targetPharmaId;
+      }
+
+      const { error: abnErr } = await sb
+        .from('abonnements')
+        .update(abnUpdatePayload)
         .eq('id', demandeId);
+
+      if (abnErr) {
+        await sb
+          .from('abonnements')
+          .update({
+            statut: 'paye_valide',
+            expire_le: expireLe,
+          })
+          .eq('id', demandeId);
+      }
+
+      // 3) UPDATE pharmacies SET is_active=true WHERE id=pharmacie_id (sans toucher is_garde)
+      if (targetPharmaId) {
+        const effectivePlan = abnRow?.plan || found?.plan || '';
+        const isStar = isStarPlanName(effectivePlan);
+        const pharmaUpdate: Record<string, any> = {
+          is_active: true,
+          updated_at: now,
+        };
+        if (isStar) {
+          pharmaUpdate.etoile_doree = true;
+          pharmaUpdate.is_premium = true;
+        }
+        const { error: pharmaErr } = await sb
+          .from('pharmacies')
+          .update(pharmaUpdate)
+          .eq('id', targetPharmaId);
+        if (pharmaErr) {
+          await sb
+            .from('pharmacies')
+            .update({ is_active: true })
+            .eq('id', targetPharmaId);
+        }
+      }
     }
   } catch (err) {
     console.warn(
@@ -1527,8 +1777,58 @@ export async function validateSubscriptionPaymentAndGenerateCode(
     );
   }
 
+  if (memoryPharmacies.length > 0) {
+    memoryPharmacies = sortPharmaciesPriority(
+      applyAbonnementsToPharmacies(memoryPharmacies, memoryDemandesAbonnement)
+    );
+  }
+
   notifyChange();
   return { code, demande: found || null };
+}
+
+/**
+ * REFUSER ABONNEMENT (Super Admin) :
+ * UPDATE public.abonnements SET statut='rejete' WHERE id=[id]
+ */
+export async function rejectSubscriptionPayment(
+  demandeId: string
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const found = memoryDemandesAbonnement.find((d) => d.id === demandeId);
+  if (found) {
+    found.statut = 'rejete';
+  }
+
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { error } = await sb
+        .from('abonnements')
+        .update({
+          statut: 'rejete',
+          updated_at: now,
+        })
+        .eq('id', demandeId);
+      if (error) {
+        await sb
+          .from('abonnements')
+          .update({ statut: 'rejete' })
+          .eq('id', demandeId);
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA] rejectSubscriptionPayment warning:', err);
+  }
+
+  if (memoryPharmacies.length > 0) {
+    memoryPharmacies = sortPharmaciesPriority(
+      applyAbonnementsToPharmacies(memoryPharmacies, memoryDemandesAbonnement)
+    );
+  }
+
+  notifyChange();
+  return true;
 }
 
 /**

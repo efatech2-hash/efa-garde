@@ -17,6 +17,8 @@ export interface Pharmacie {
   phone?: string;
   lat: number;
   lng: number;
+  latitude?: number;
+  longitude?: number;
   adresse: string;
   plan: PlanType;
   is_online: boolean;
@@ -168,8 +170,10 @@ export interface DemandeAbonnement {
   statut: 'en_attente' | 'paye_valide' | 'rejete';
   code_validation?: string;
   created_at: string;
+  pharmacy_id?: string;
   pharmacie_id?: string;
   validated_at?: string;
+  expire_le?: string;
 }
 
 export interface Abonnement {

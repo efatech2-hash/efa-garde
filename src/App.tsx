@@ -256,6 +256,7 @@ export default function App() {
       currentPath === '/dashboard-pharma' ||
       currentPath === '/inbox' ||
       currentPath === '/abonnement' ||
+      currentPath === '/abonnements' ||
       currentPath === '/qr' ||
       currentPath === '/profil' ||
       currentPath === '/pharma/stats' ||
@@ -757,7 +758,7 @@ export default function App() {
         />
       );
     }
-  } else if (currentPath === '/abonnement') {
+  } else if (currentPath === '/abonnement' || currentPath === '/abonnements') {
     if (isPharmaUser) {
       content = (
         <SubscriptionPage
