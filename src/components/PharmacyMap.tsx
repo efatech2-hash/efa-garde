@@ -70,6 +70,8 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
                 : NaN;
             const lat = Number.isFinite(parsedLat) && parsedLat !== 0 ? parsedLat : 6.1319;
             const lng = Number.isFinite(parsedLng) && parsedLng !== 0 ? parsedLng : 1.2228;
+            const isActive = p.is_active !== false;
+            const isGarde = Boolean(p.is_garde ?? p.is_online);
             return {
               ...p,
               nom: p.nom || 'Pharmacie',
@@ -81,9 +83,10 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
               lng,
               latitude: p.latitude ?? lat,
               longitude: p.longitude ?? lng,
-              is_active: p.is_active !== false,
-              is_garde: Boolean(p.is_garde ?? p.is_online),
-              is_online: Boolean(p.is_garde ?? p.is_online),
+              is_active: isActive,
+              is_pending: false,
+              is_garde: isGarde,
+              is_online: isGarde,
             };
           });
           console.log(normalized);
@@ -180,20 +183,18 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
         distanceText = ` • ${formatDistanceShort(d)}`;
       }
 
-      // Règles visuelles par abonnement (sans modifier is_garde)
-      const isPending = Boolean(p.is_pending);
+      // Règles visuelles par abonnement et statut (sans filtre is_verified / statut_validation)
+      const isActivePharma = p.is_active !== false;
+      const isGarde = Boolean(p.is_garde ?? p.is_online);
       const planStr = String(p.plan || '').toLowerCase();
-      const isStarYellow =
-        !isPending &&
-        Boolean(
-          p.etoile_doree ||
-            p.is_premium ||
-            planStr === 'populaire_mensuel' ||
-            planStr === 'populaire_annuel' ||
-            planStr.includes('star')
-        );
+      const isStarYellow = Boolean(
+        p.etoile_doree ||
+          p.is_premium ||
+          planStr === 'populaire_mensuel' ||
+          planStr === 'populaire_annuel' ||
+          planStr.includes('star')
+      );
       const isPaidGreen =
-        !isPending &&
         !isStarYellow &&
         Boolean(
           p.subscription_status === 'active' ||
@@ -209,15 +210,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
       let bgClass = 'bg-slate-600 border-slate-400 text-slate-200';
       let ringHtml = '';
 
-      if (isPending) {
-        // PIN GRIS + badge "En cours de vérification"
-        bgClass = 'bg-slate-700 border-slate-400 text-slate-200 shadow-md';
-        ringHtml = `
-          <span class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-500 text-slate-950 font-black rounded-full flex items-center justify-center text-[9px] shadow border border-white">
-            ⏳
-          </span>
-        `;
-      } else if (isStarYellow) {
+      if (isStarYellow) {
         // JAUNE BRILLANT + etoile_doree=true (star_mensuel + paye_valide)
         bgClass =
           'bg-gradient-to-tr from-yellow-400 via-amber-300 to-yellow-500 border-yellow-100 text-slate-950 shadow-xl shadow-yellow-400/70';
@@ -237,9 +230,13 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
         bgClass = 'bg-slate-600 border-slate-400 text-slate-200 opacity-95';
       }
 
-      const labelContent = isPending
-        ? `${p.nom} • En cours de vérification`
-        : `${p.nom}${distanceText}`;
+      const statusBadge = isGarde
+        ? 'De garde'
+        : isActivePharma
+        ? 'Ouverte'
+        : 'Fermée';
+
+      const labelContent = `${p.nom} • ${statusBadge}${distanceText}`;
 
       const iconHtml = `
         <div class="relative group cursor-pointer flex items-center justify-center transition-transform hover:scale-110">

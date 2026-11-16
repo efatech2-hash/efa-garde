@@ -20,9 +20,8 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
   userLocation,
 }) => {
   const isOnline = Boolean(pharmacy.is_garde ?? pharmacy.is_online);
-  const canChat = Boolean(
-    isOnline && pharmacy.is_active !== false && !pharmacy.is_pending
-  );
+  const isActive = pharmacy.is_active !== false;
+  const canChat = Boolean(isOnline && isActive);
   const isPopulaire = Boolean(
     pharmacy.is_premium ||
       pharmacy.etoile_doree ||
@@ -79,32 +78,32 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
           </span>
         )}
 
-        {pharmacy.is_pending ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-            EN COURS DE VÉRIFICATION
-          </span>
-        ) : (
-          <span
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
-              isOnline
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
-                : 'bg-slate-800 text-slate-400 border border-slate-700'
-            }`}
-          >
-            {isOnline ? (
-              <>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                DE GARDE • EN LIGNE
-              </>
-            ) : (
-              <>
-                <span className="w-2 h-2 rounded-full bg-slate-500"></span>
-                HORS GARDE • HORS LIGNE
-              </>
-            )}
-          </span>
-        )}
+        <span
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
+            isOnline
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+              : isActive
+              ? 'bg-blue-500/15 text-blue-300 border border-blue-500/40'
+              : 'bg-slate-800 text-slate-400 border border-slate-700'
+          }`}
+        >
+          {isOnline ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              DE GARDE
+            </>
+          ) : isActive ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+              OUVERTE
+            </>
+          ) : (
+            <>
+              <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+              FERMÉE
+            </>
+          )}
+        </span>
 
         {distanceKm !== undefined && (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 ml-auto">
@@ -118,12 +117,6 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
         <div className="mb-3 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-2">
           <span>⭐</span>
           <span>Officine mise en avant en première position à Lomé</span>
-        </div>
-      )}
-
-      {pharmacy.is_pending && (
-        <div className="mb-3 p-2.5 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-200">
-          ⏳ Cette pharmacie a été ajoutée récemment et est en cours de vérification administrative.
         </div>
       )}
 

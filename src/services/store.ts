@@ -360,6 +360,7 @@ function isPaidGreenPlanName(plan?: string | null): boolean {
 
 function normalizePharmacyRow(p: any): Pharmacie {
   const isGarde = Boolean(p.is_garde ?? p.is_online);
+  const isActive = p.is_active !== false;
   const phone = String(p.phone || p.tel || '');
   const lat = parseCoord(p.lat ?? p.latitude, 6.1319);
   const lng = parseCoord(p.lng ?? p.longitude, 1.2228);
@@ -378,8 +379,8 @@ function normalizePharmacyRow(p: any): Pharmacie {
     is_garde: isGarde,
     is_online: isGarde,
     is_verified: Boolean(p.is_verified),
-    is_active: p.is_active !== false,
-    is_pending: Boolean(p.is_pending),
+    is_active: isActive,
+    is_pending: isActive ? false : Boolean(p.is_pending),
   };
 }
 
@@ -597,7 +598,6 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
 export function loadApprovedPharmacies(): Pharmacie[] {
   return memoryPharmacies.filter((p) => {
     if (isDemoPharmacy(p)) return false;
-    if (p.is_pending === true) return false;
     if (p.is_active === false) return false;
     return true;
   });

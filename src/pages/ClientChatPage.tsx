@@ -164,8 +164,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   const canClientChat = Boolean(
     pharmacy &&
       (pharmacy.is_garde ?? pharmacy.is_online) &&
-      pharmacy.is_active !== false &&
-      !pharmacy.is_pending
+      pharmacy.is_active !== false
   );
 
   // Persistent client guest ID

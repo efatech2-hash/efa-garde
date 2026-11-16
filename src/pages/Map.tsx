@@ -49,6 +49,7 @@ export const Map: React.FC<MapProps> = ({
   const [onlyOnline, setOnlyOnline] = useState(false);
   const [shareFeedback, setShareFeedback] = useState(false);
   const [showInstallHelpModal, setShowInstallHelpModal] = useState(false);
+  const [fetchedPharmacies, setFetchedPharmacies] = useState<Pharmacie[]>([]);
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
 
   const handleInstallWebApp = async () => {
@@ -157,19 +158,26 @@ export const Map: React.FC<MapProps> = ({
     );
   };
 
-  // Sync pharmacies from view_pharmacies_garde (is_active=true) & abonnements
+  // Sync pharmacies from view_pharmacies_garde (fallback pharmacies WHERE is_active=true) & abonnements
   useEffect(() => {
     fetchDemandesAbonnement().catch(() => {});
-    fetchApprovedPharmacies().catch((err) =>
-      console.warn('Map initial fetchApprovedPharmacies fallback:', err)
-    );
+    fetchApprovedPharmacies()
+      .then((list) => {
+        if (Array.isArray(list)) {
+          setFetchedPharmacies(list);
+        }
+      })
+      .catch((err) =>
+        console.warn('Map initial fetchApprovedPharmacies fallback:', err)
+      );
   }, []);
 
   // 2 & 3. CALCUL DE DISTANCE & TRI PRIVILÈGE POPULAIRE (TÊTE DE LISTE) + DISTANCE
   const displayedPharmacies = useMemo(() => {
+    const sourceList = pharmacies.length > 0 ? pharmacies : fetchedPharmacies;
     // Déduplication stricte par ID pour éviter toute clé React en double
     const seenIds = new Set<string>();
-    const cleanList = pharmacies.filter((p) => {
+    const cleanList = sourceList.filter((p) => {
       if (!p || !p.id || seenIds.has(p.id)) return false;
       seenIds.add(p.id);
       return true;
@@ -234,7 +242,7 @@ export const Map: React.FC<MapProps> = ({
 
         return (a.nom || '').localeCompare(b.nom || '');
       });
-  }, [pharmacies, searchQuery, onlyOnline, userLocation]);
+  }, [pharmacies, fetchedPharmacies, searchQuery, onlyOnline, userLocation]);
 
   return (
     <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-3 space-y-3 pb-28">
@@ -375,7 +383,11 @@ export const Map: React.FC<MapProps> = ({
 
             <button
               onClick={() => {
-                fetchApprovedPharmacies().catch(() => {});
+                fetchApprovedPharmacies()
+                  .then((list) => {
+                    if (Array.isArray(list)) setFetchedPharmacies(list);
+                  })
+                  .catch(() => {});
                 onRefresh();
               }}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
@@ -433,27 +445,32 @@ export const Map: React.FC<MapProps> = ({
                       )}
                     </div>
 
-                    {p.is_pending ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                        EN COURS DE VÉRIFICATION
-                      </span>
-                    ) : (
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${
-                          p.is_online
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                            : 'bg-slate-800 text-slate-400 border border-slate-700'
-                        }`}
-                      >
+                    {(() => {
+                      const isGarde = Boolean(p.is_garde ?? p.is_online);
+                      const isActive = p.is_active !== false;
+                      return (
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            p.is_online ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${
+                            isGarde
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : isActive
+                              ? 'bg-blue-500/15 text-blue-300 border border-blue-500/40'
+                              : 'bg-slate-800 text-slate-400 border border-slate-700'
                           }`}
-                        />
-                        {p.is_online ? 'EN LIGNE' : 'FERMÉE'}
-                      </span>
-                    )}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isGarde
+                                ? 'bg-emerald-400 animate-pulse'
+                                : isActive
+                                ? 'bg-blue-400'
+                                : 'bg-slate-500'
+                            }`}
+                          />
+                          {isGarde ? 'DE GARDE' : isActive ? 'OUVERTE' : 'FERMÉE'}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   <div className="text-xs text-slate-300 flex items-center gap-1.5">
@@ -464,9 +481,7 @@ export const Map: React.FC<MapProps> = ({
                   {/* Actions faciles au pouce : Appeler, Itinéraire, Tchatter */}
                   {(() => {
                     const canChat = Boolean(
-                      (p.is_garde ?? p.is_online) &&
-                        p.is_active !== false &&
-                        !p.is_pending
+                      (p.is_garde ?? p.is_online) && p.is_active !== false
                     );
                     return (
                       <div
