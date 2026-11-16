@@ -46,6 +46,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               currentPath === '/pharma/stats' ||
               currentPath === '/stats',
           },
+          {
+            id: 'chat',
+            label: 'Chat',
+            icon: MessageSquare,
+            path: '/inbox',
+            isActive: currentPath === '/inbox',
+          },
         ]
       : []),
     {
@@ -59,13 +66,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         currentPath === '/carte' ||
         currentPath === '/client' ||
         currentPath === '/map',
-    },
-    {
-      id: 'chat',
-      label: 'Chat',
-      icon: MessageSquare,
-      path: '/inbox',
-      isActive: currentPath === '/inbox',
     },
     {
       id: 'pub',

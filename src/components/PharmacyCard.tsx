@@ -19,7 +19,10 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
   distanceKm,
   userLocation,
 }) => {
-  const isOnline = pharmacy.is_online;
+  const isOnline = Boolean(pharmacy.is_garde ?? pharmacy.is_online);
+  const canChat = Boolean(
+    isOnline && pharmacy.is_active !== false && !pharmacy.is_pending
+  );
   const isPopulaire = Boolean(
     pharmacy.is_premium ||
       pharmacy.etoile_doree ||
@@ -153,7 +156,11 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
       </div>
 
       {/* Action Buttons Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800">
+      <div
+        className={`grid grid-cols-1 ${
+          canChat ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+        } gap-2.5 pt-2 border-t border-slate-800`}
+      >
         {/* Appeler */}
         <a
           href={`tel:${pharmacy.tel}`}
@@ -201,8 +208,8 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
           <span>Itinéraire</span>
         </button>
 
-        {/* Chat Live (actif si is_online, disabled sinon) */}
-        {isOnline ? (
+        {/* Tchatter : visible UNIQUEMENT si is_garde=true ET is_active=true */}
+        {canChat && (
           <button
             onClick={() => {
               recordClientContact(pharmacy.id);
@@ -211,25 +218,10 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
             className="min-h-[48px] flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/30 active:scale-95 cursor-pointer"
           >
             <MessageSquare className="w-4 h-4" />
-            <span>Chat Live</span>
-          </button>
-        ) : (
-          <button
-            disabled
-            className="min-h-[48px] flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-slate-800/60 text-slate-500 border border-slate-800 font-medium text-xs cursor-not-allowed opacity-60"
-            title="Pharmacie hors ligne"
-          >
-            <MessageSquare className="w-4 h-4" />
-            <span>Chat Inactif</span>
+            <span>Tchatter</span>
           </button>
         )}
       </div>
-
-      {!isOnline && (
-        <p className="text-[11px] text-slate-500 text-center mt-2">
-          Le chat en direct est accessible dès que la pharmacie active son statut de garde.
-        </p>
-      )}
     </div>
   );
 };

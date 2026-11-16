@@ -31,17 +31,26 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
   const dottedLinesRef = useRef<L.Polyline[]>([]);
   const [directPharmacies, setDirectPharmacies] = useState<Pharmacie[]>([]);
 
-  // Lecture directe FROM pharmacies WHERE is_active=true (aucun filtre sur statut_validation)
+  // Lecture directe view_pharmacies_garde -> fallback obligatoire FROM pharmacies WHERE is_active=true
   useEffect(() => {
     let active = true;
     const loadDirectPharmacies = async () => {
       try {
         const client = getSupabaseClient();
         if (!client) return;
-        const { data, error } = await client
-          .from('pharmacies')
+        let { data, error } = await client
+          .from('view_pharmacies_garde')
           .select('*')
           .eq('is_active', true);
+
+        if (error || !Array.isArray(data) || data.length === 0) {
+          const fallbackRes = await client
+            .from('pharmacies')
+            .select('*')
+            .eq('is_active', true);
+          data = fallbackRes.data;
+          error = fallbackRes.error;
+        }
 
         if (error) {
           console.error('[PharmacyMap] Erreur SELECT pharmacies:', error.message);
@@ -51,14 +60,16 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
           const normalized: Pharmacie[] = data.map((p: any) => {
             const rawLat = p.lat ?? p.latitude;
             const rawLng = p.lng ?? p.longitude;
-            const lat =
-              rawLat !== null && rawLat !== undefined && rawLat !== '' && Number.isFinite(Number(rawLat))
-                ? Number(rawLat)
-                : LOME_CENTER.lat;
-            const lng =
-              rawLng !== null && rawLng !== undefined && rawLng !== '' && Number.isFinite(Number(rawLng))
-                ? Number(rawLng)
-                : LOME_CENTER.lng;
+            const parsedLat =
+              rawLat !== null && rawLat !== undefined && rawLat !== ''
+                ? Number(String(rawLat).replace(',', '.'))
+                : NaN;
+            const parsedLng =
+              rawLng !== null && rawLng !== undefined && rawLng !== ''
+                ? Number(String(rawLng).replace(',', '.'))
+                : NaN;
+            const lat = Number.isFinite(parsedLat) && parsedLat !== 0 ? parsedLat : 6.1319;
+            const lng = Number.isFinite(parsedLng) && parsedLng !== 0 ? parsedLng : 1.2228;
             return {
               ...p,
               nom: p.nom || 'Pharmacie',
@@ -75,7 +86,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
               is_online: Boolean(p.is_garde ?? p.is_online),
             };
           });
-          console.log('pharmacies', normalized);
+          console.log(normalized);
           setDirectPharmacies(normalized);
         }
       } catch (err) {
@@ -137,7 +148,7 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    console.log('pharmacies', visiblePharmacies);
+    console.log(visiblePharmacies);
 
     // Remove old markers not in current list
     markersRef.current.forEach((marker, id) => {
@@ -148,19 +159,19 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
     });
 
     visiblePharmacies.forEach((p) => {
-      // Position : lat ?? latitude , lng ?? longitude (ne jamais filtrer si latitude null)
+      // Position : lat ?? latitude , lng ?? longitude (si null/invalide -> 6.1319, 1.2228 par défaut)
       const rawLat: unknown = p.lat ?? p.latitude;
       const rawLng: unknown = p.lng ?? p.longitude;
       const parsedLat =
         rawLat !== null && rawLat !== undefined && rawLat !== ''
-          ? Number(rawLat)
+          ? Number(String(rawLat).replace(',', '.'))
           : NaN;
       const parsedLng =
         rawLng !== null && rawLng !== undefined && rawLng !== ''
-          ? Number(rawLng)
+          ? Number(String(rawLng).replace(',', '.'))
           : NaN;
-      const lat = Number.isFinite(parsedLat) ? parsedLat : LOME_CENTER.lat;
-      const lng = Number.isFinite(parsedLng) ? parsedLng : LOME_CENTER.lng;
+      const lat = Number.isFinite(parsedLat) && parsedLat !== 0 ? parsedLat : 6.1319;
+      const lng = Number.isFinite(parsedLng) && parsedLng !== 0 ? parsedLng : 1.2228;
 
       // Calcul distance si utilisateur géolocalisé
       let distanceText = '';
@@ -357,8 +368,12 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !selectedPharmacy) return;
-    const sLat = selectedPharmacy.lat ?? selectedPharmacy.latitude ?? LOME_CENTER.lat;
-    const sLng = selectedPharmacy.lng ?? selectedPharmacy.longitude ?? LOME_CENTER.lng;
+    const rawSLat = selectedPharmacy.lat ?? selectedPharmacy.latitude;
+    const rawSLng = selectedPharmacy.lng ?? selectedPharmacy.longitude;
+    const pSLat = rawSLat != null ? Number(String(rawSLat).replace(',', '.')) : NaN;
+    const pSLng = rawSLng != null ? Number(String(rawSLng).replace(',', '.')) : NaN;
+    const sLat = Number.isFinite(pSLat) && pSLat !== 0 ? pSLat : 6.1319;
+    const sLng = Number.isFinite(pSLng) && pSLng !== 0 ? pSLng : 1.2228;
     map.flyTo([sLat, sLng], 15, {
       duration: 1.2,
     });

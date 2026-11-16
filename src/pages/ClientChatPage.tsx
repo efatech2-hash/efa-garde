@@ -161,6 +161,12 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   onBack,
 }) => {
   const pharmacy = pharmacies.find((p) => p.id === pharmacieId) || pharmacies[0];
+  const canClientChat = Boolean(
+    pharmacy &&
+      (pharmacy.is_garde ?? pharmacy.is_online) &&
+      pharmacy.is_active !== false &&
+      !pharmacy.is_pending
+  );
 
   // Persistent client guest ID
   const [clientId] = useState(() => {
@@ -357,6 +363,11 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   const handleSendText = (textToSend?: string) => {
     const text = (textToSend !== undefined ? textToSend : inputText).trim();
     if (!text || !conversation) return;
+
+    if (!canClientChat) {
+      showToast('Tchat indisponible : cette pharmacie n’est pas de garde.');
+      return;
+    }
 
     if (conversation.is_blocked) {
       if (conversation.blocked_by_type === 'pharmacy') {
@@ -975,9 +986,22 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 3. INPUT BARRE EN BAS FIXED : position fixed bottom-0 left-0 right-0, avec safe-area-inset-bottom, bg-[#f0f0f0] p-2, flex gap-2 items-end */}
+      {/* 3. INPUT BARRE EN BAS FIXED : désactivée si is_garde=false ou !is_active */}
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-[#f0f0f0] border-t border-gray-300/80 shadow-md chat-input-bar pb-safe">
-        {conversation?.is_blocked ? (
+        {!canClientChat ? (
+          <div className="p-3 max-w-5xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-2 text-slate-700">
+            <span className="text-xs sm:text-sm font-semibold text-center sm:text-left">
+              Cette pharmacie n&apos;est pas de garde actuellement. Le tchat est désactivé.
+            </span>
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-4 py-2 rounded-xl bg-[#0A3D8F] hover:bg-[#082e6d] text-white text-xs font-bold cursor-pointer shrink-0"
+            >
+              Retour à la carte
+            </button>
+          </div>
+        ) : conversation?.is_blocked ? (
           <div className="p-3 max-w-5xl mx-auto w-full">
             {conversation.blocked_by_type === 'client' ? (
               <div className="bg-slate-200/90 border border-slate-300 rounded-2xl p-3 sm:p-4 flex items-center justify-between gap-3 text-slate-800 shadow-inner">

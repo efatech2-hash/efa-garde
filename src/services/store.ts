@@ -327,8 +327,9 @@ function generateUuid(): string {
 
 function parseCoord(val: unknown, fallback: number): number {
   if (val === null || val === undefined || val === '') return fallback;
-  const n = Number(val);
-  return Number.isFinite(n) ? n : fallback;
+  const cleaned = typeof val === 'string' ? val.replace(',', '.').trim() : val;
+  const n = Number(cleaned);
+  return Number.isFinite(n) && n !== 0 ? n : fallback;
 }
 
 function isStarPlanName(plan?: string | null): boolean {
@@ -505,17 +506,33 @@ export async function fetchPharmacies(): Promise<Pharmacie[]> {
 }
 
 /**
- * CARTE PUBLIQUE : Lecture directe FROM public.pharmacies WHERE is_active=true
- * Aucun filtre sur statut_validation, is_verified, is_garde ni latitude null.
+ * CARTE PUBLIQUE : Lecture view_pharmacies_garde WHERE is_active=true
+ * Fallback obligatoire : SELECT * FROM public.pharmacies WHERE is_active=true
+ * Aucun filtre sur is_garde, is_verified, statut_validation ni latitude null.
  */
 export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
   try {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client
-        .from('pharmacies')
+      let { data, error } = await client
+        .from('view_pharmacies_garde')
         .select('*')
         .eq('is_active', true);
+
+      if (error || !Array.isArray(data) || data.length === 0) {
+        if (error) {
+          console.warn(
+            '[EFA GARDE] view_pharmacies_garde fallback vers pharmacies:',
+            error.message
+          );
+        }
+        const fallbackRes = await client
+          .from('pharmacies')
+          .select('*')
+          .eq('is_active', true);
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
 
       if (error) {
         console.error('[EFA GARDE] Erreur SELECT pharmacies:', error.message);

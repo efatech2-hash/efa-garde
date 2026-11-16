@@ -461,56 +461,64 @@ export const Map: React.FC<MapProps> = ({
                     <span className="truncate">{p.adresse}</span>
                   </div>
 
-                  {/* Actions faciles au pouce : Appeler, Itinéraire, Chatter */}
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
-                    <a
-                      href={`tel:${p.tel}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        recordClientContact(p.id);
-                      }}
-                      className="min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-xs border border-slate-700 transition-colors"
-                      title="Appeler l'officine"
-                    >
-                      <Phone className="w-3.5 h-3.5" />
-                      <span>Appeler</span>
-                    </a>
+                  {/* Actions faciles au pouce : Appeler, Itinéraire, Tchatter */}
+                  {(() => {
+                    const canChat = Boolean(
+                      (p.is_garde ?? p.is_online) &&
+                        p.is_active !== false &&
+                        !p.is_pending
+                    );
+                    return (
+                      <div
+                        className={`grid ${
+                          canChat ? 'grid-cols-3' : 'grid-cols-2'
+                        } gap-2 pt-2 border-t border-slate-800`}
+                      >
+                        <a
+                          href={`tel:${p.tel}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            recordClientContact(p.id);
+                          }}
+                          className="min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-xs border border-slate-700 transition-colors"
+                          title="Appeler l'officine"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          <span>Appeler</span>
+                        </a>
 
-                    {/* 5. Bouton "Itinéraire" ouvre Google Maps Navigation */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        trackItineraryClick(p.id);
-                        handleOpenItinerary(p.lat, p.lng);
-                      }}
-                      className="min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 font-bold text-xs border border-blue-500/40 transition-colors cursor-pointer"
-                      title="Ouvrir l'itinéraire Google Maps"
-                    >
-                      <Navigation className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Itinéraire</span>
-                    </button>
+                        {/* 5. Bouton "Itinéraire" ouvre Google Maps Navigation */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            trackItineraryClick(p.id);
+                            handleOpenItinerary(p.lat, p.lng);
+                          }}
+                          className="min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 font-bold text-xs border border-blue-500/40 transition-colors cursor-pointer"
+                          title="Ouvrir l'itinéraire Google Maps"
+                        >
+                          <Navigation className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Itinéraire</span>
+                        </button>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (p.is_online) {
-                          recordClientContact(p.id);
-                          onOpenChat(p.id);
-                        }
-                      }}
-                      disabled={!p.is_online || p.is_pending}
-                      className={`min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl font-bold text-xs transition-all ${
-                        p.is_online && !p.is_pending
-                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30 cursor-pointer'
-                          : 'bg-slate-800/60 text-slate-500 border border-slate-800 cursor-not-allowed opacity-60'
-                      }`}
-                      title={p.is_pending ? 'En attente de vérification' : p.is_online ? 'Discuter en direct' : 'Pharmacie hors ligne'}
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>{p.is_pending ? 'Vérif...' : p.is_online ? 'Chatter' : 'Inactif'}</span>
-                    </button>
-                  </div>
+                        {canChat && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              recordClientContact(p.id);
+                              onOpenChat(p.id);
+                            }}
+                            className="min-h-[46px] flex items-center justify-center gap-1.5 rounded-xl font-bold text-xs transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30 cursor-pointer"
+                            title="Discuter en direct"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>Tchatter</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

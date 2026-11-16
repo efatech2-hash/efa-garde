@@ -43,6 +43,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               currentPath === '/pharma/stats' ||
               currentPath === '/stats',
           },
+          {
+            id: 'chat',
+            label: 'Chat',
+            icon: MessageSquare,
+            path: '/inbox',
+            isActive: currentPath === '/inbox',
+          },
         ]
       : []),
     {
@@ -55,13 +62,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         currentPath === '/client' ||
         currentPath === '/map' ||
         currentPath === '/home',
-    },
-    {
-      id: 'chat',
-      label: 'Chat',
-      icon: MessageSquare,
-      path: '/inbox',
-      isActive: currentPath === '/inbox',
     },
     {
       id: 'pub',
