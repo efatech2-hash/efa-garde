@@ -370,6 +370,8 @@ function normalizePharmacyRow(p: any): Pharmacie {
     quartier: p.quartier || 'Lomé',
     lat,
     lng,
+    latitude: p.latitude ?? lat,
+    longitude: p.longitude ?? lng,
     plan: p.plan || 'free',
     is_garde: isGarde,
     is_online: isGarde,
@@ -514,13 +516,22 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
         .select('*')
         .eq('is_active', true);
 
-      if (error || !Array.isArray(data)) {
+      if (error || !Array.isArray(data) || data.length === 0) {
+        if (error) {
+          console.warn(
+            '[EFA GARDE] view_pharmacies_garde fallback vers pharmacies:',
+            error.message
+          );
+        }
         const fallbackRes = await client
           .from('pharmacies')
           .select('*')
           .eq('is_active', true);
         data = fallbackRes.data;
         error = fallbackRes.error;
+        if (error) {
+          console.error('[EFA GARDE] Erreur SELECT pharmacies:', error.message);
+        }
       }
 
       if (!error && data && Array.isArray(data)) {
@@ -562,6 +573,8 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
         );
         const sorted = sortPharmaciesPriority(enriched);
 
+        console.log('pharmacies', sorted);
+
         // Préserve les inactives déjà en mémoire pour l'admin
         const inactiveOrOther = memoryPharmacies.filter((p) => p.is_active === false);
         memoryPharmacies = sortPharmaciesPriority([...sorted, ...inactiveOrOther]);
@@ -572,7 +585,9 @@ export async function fetchApprovedPharmacies(): Promise<Pharmacie[]> {
   } catch (err) {
     console.warn('[EFA GARDE] fetchApprovedPharmacies fallback:', err);
   }
-  return loadApprovedPharmacies();
+  const fallbackList = loadApprovedPharmacies();
+  console.log('pharmacies', fallbackList);
+  return fallbackList;
 }
 
 export function loadApprovedPharmacies(): Pharmacie[] {
@@ -1053,6 +1068,13 @@ export async function activateSubscriptionInDB(
     options.durationDays || (planType === 'premium_15k' ? 30 : 365);
   const end = new Date(now.getTime() + durationDays * 86400000);
 
+  const abnPlanName =
+    planType === 'premium_140k'
+      ? 'star_annuel'
+      : planType === 'premium_15k'
+      ? 'star_mensuel'
+      : 'annuel_officine';
+
   const updates: Partial<Pharmacie> = {
     subscription_plan: isPremium ? 'premium' : 'basic',
     subscription_status: 'active',
@@ -1084,57 +1106,98 @@ export async function activateSubscriptionInDB(
   try {
     const client = getSupabaseClient();
     if (client && isValidUuid(pharmacyId)) {
-      await client
+      const { error: phErr } = await client
         .from('pharmacies')
         .update(updates)
         .eq('id', pharmacyId);
 
+      if (phErr) {
+        console.warn(
+          '[EFA GARDE] UPDATE pharmacies complet échoué, fallback is_active=true:',
+          phErr.message
+        );
+        const { error: minPhErr } = await client
+          .from('pharmacies')
+          .update({
+            is_active: true,
+            ...(isPremium ? { etoile_doree: true, is_premium: true } : {}),
+          })
+          .eq('id', pharmacyId);
+        if (minPhErr) {
+          console.error(
+            '[EFA GARDE] Erreur UPDATE pharmacies (is_active=true):',
+            minPhErr
+          );
+        }
+      }
+
       const currentPharma = memoryPharmacies.find((p) => p.id === pharmacyId);
       const pharmaNom = updates.nom || currentPharma?.nom || 'Pharmacie';
 
-      const { data: existingAbn } = await client
+      let existingAbn: any = null;
+      const byPharmacie = await client
         .from('abonnements')
         .select('id')
-        .eq('pharmacy_id', pharmacyId)
+        .eq('pharmacie_id', pharmacyId)
         .limit(1)
         .maybeSingle();
+
+      if (!byPharmacie.error && byPharmacie.data?.id) {
+        existingAbn = byPharmacie.data;
+      } else {
+        const byPharmacy = await client
+          .from('abonnements')
+          .select('id')
+          .eq('pharmacy_id', pharmacyId)
+          .limit(1)
+          .maybeSingle();
+        if (!byPharmacy.error && byPharmacy.data?.id) {
+          existingAbn = byPharmacy.data;
+        }
+      }
 
       if (existingAbn?.id) {
         const { error: abnUpdErr } = await client
           .from('abonnements')
           .update({
-            pharmacy_id: pharmacyId,
+            pharmacie_id: pharmacyId,
             nom_pharmacie: pharmaNom,
-            plan: updates.plan || 'populaire_mensuel',
-            statut: 'actif',
-            montant: updates.prix || 15000,
+            plan: abnPlanName,
+            statut: 'paye_valide',
+            montant: updates.prix || 90000,
             date_debut: now.toISOString(),
             expire_le: end.toISOString(),
             updated_at: now.toISOString(),
           })
           .eq('id', existingAbn.id);
         if (abnUpdErr) {
-          await client
+          console.warn(
+            '[EFA GARDE] UPDATE abonnements complet échoué, tentative minimale:',
+            abnUpdErr.message
+          );
+          const { error: minAbnErr } = await client
             .from('abonnements')
             .update({
-              pharmacy_id: pharmacyId,
-              plan: updates.plan || 'populaire_mensuel',
-              statut: 'actif',
-              montant: updates.prix || 15000,
-              date_debut: now.toISOString(),
+              statut: 'paye_valide',
+              plan: abnPlanName,
+              montant: updates.prix || 90000,
               expire_le: end.toISOString(),
             })
             .eq('id', existingAbn.id);
+          if (minAbnErr) {
+            console.error('[EFA GARDE] Erreur UPDATE abonnements:', minAbnErr);
+          }
         }
       } else {
+        const abnId = generateUuid();
         const abnPayload = {
-          id: generateUuid(),
-          pharmacy_id: pharmacyId,
+          id: abnId,
+          pharmacie_id: pharmacyId,
           entreprise_id: pharmacyId,
           nom_pharmacie: pharmaNom,
-          plan: updates.plan || 'populaire_mensuel',
-          statut: 'actif',
-          montant: updates.prix || 15000,
+          plan: abnPlanName,
+          statut: 'paye_valide',
+          montant: updates.prix || 90000,
           date_debut: now.toISOString(),
           expire_le: end.toISOString(),
           created_at: now.toISOString(),
@@ -1144,28 +1207,34 @@ export async function activateSubscriptionInDB(
           .from('abonnements')
           .insert([abnPayload]);
         if (abnInsertErr) {
+          console.warn(
+            '[EFA GARDE] INSERT abonnements complet échoué, tentative minimale:',
+            abnInsertErr.message
+          );
           const { error: minErr } = await client.from('abonnements').insert([
             {
-              id: abnPayload.id,
-              pharmacy_id: pharmacyId,
-              plan: abnPayload.plan,
-              statut: 'actif',
-              montant: abnPayload.montant,
-              date_debut: abnPayload.date_debut,
-              expire_le: abnPayload.expire_le,
+              id: abnId,
+              pharmacie_id: pharmacyId,
+              nom_pharmacie: pharmaNom,
+              plan: abnPlanName,
+              statut: 'paye_valide',
+              montant: updates.prix || 90000,
+              date_debut: now.toISOString(),
+              expire_le: end.toISOString(),
             },
           ]);
           if (minErr) {
-            console.warn('[EFA GARDE] INSERT abonnements:', minErr.message);
+            console.error('[EFA GARDE] Erreur INSERT abonnements:', minErr);
           }
         }
       }
     }
   } catch (err) {
-    console.warn('[EFA GARDE] Failed to update DB:', err);
+    console.error('[EFA GARDE] Failed to update DB:', err);
   }
 
   const updated = updatePharmacySuperAdmin(pharmacyId, updates);
+  await fetchDemandesAbonnement().catch(() => {});
   notifyChange();
   return updated;
 }
@@ -1648,7 +1717,12 @@ export async function validateSubscriptionPaymentAndGenerateCode(
   demandeId: string,
   customCode?: string,
   demandeObj?: DemandeAbonnement
-): Promise<{ code: string; demande: DemandeAbonnement | null }> {
+): Promise<{
+  code: string;
+  demande: DemandeAbonnement | null;
+  ok: boolean;
+  error?: string;
+}> {
   const code = customCode || Math.floor(1000 + Math.random() * 9000).toString();
   const nowDate = new Date();
   const now = nowDate.toISOString();
@@ -1679,23 +1753,33 @@ export async function validateSubscriptionPaymentAndGenerateCode(
     validated_at: now,
   };
 
+  let dbOk = true;
+  let dbErrorMsg: string | undefined;
+
   // Synchronisation Supabase table abonnements + pharmacies
   try {
     const sb = getSupabaseClient();
     if (sb) {
       // 1) Récupère la ligne d'abonnement exacte en DB si possible
-      const { data: abnRow } = await sb
+      const { data: abnRow, error: fetchAbnErr } = await sb
         .from('abonnements')
         .select('*')
         .eq('id', demandeId)
         .maybeSingle();
 
+      if (fetchAbnErr) {
+        console.error(
+          '[EFA] SELECT abonnements validation:',
+          fetchAbnErr.message
+        );
+      }
+
       let targetPharmaId: string | null = null;
       const rawPid =
-        abnRow?.pharmacy_id ||
         abnRow?.pharmacie_id ||
-        found?.pharmacy_id ||
-        found?.pharmacie_id;
+        abnRow?.pharmacy_id ||
+        found?.pharmacie_id ||
+        found?.pharmacy_id;
       if (isValidUuid(rawPid)) {
         targetPharmaId = rawPid;
       }
@@ -1708,47 +1792,101 @@ export async function validateSubscriptionPaymentAndGenerateCode(
 
       // Si pharmacie_id null, match nom_pharmacie = pharmacies.nom
       if (!targetPharmaId && targetNom) {
-        const { data: matchedByExact } = await sb
+        const { data: matchedByExact, error: matchErr } = await sb
           .from('pharmacies')
           .select('id, nom')
           .ilike('nom', targetNom)
           .limit(1)
           .maybeSingle();
+        if (matchErr) {
+          console.error('[EFA] Match pharmacie par nom:', matchErr.message);
+        }
         if (matchedByExact?.id && isValidUuid(matchedByExact.id)) {
           targetPharmaId = matchedByExact.id;
         }
       }
 
-      // 2) UPDATE abonnements SET statut='paye_valide', expire_le=now()+interval WHERE id=[id]
+      const effectivePlan = abnRow?.plan || found?.plan || 'enregistrement_25k';
+      const effectiveMontant =
+        Number(abnRow?.montant ?? found?.montant) || 25000;
+      const effectiveMonthly =
+        effectivePlan.toLowerCase().includes('mensuel') ||
+        effectiveMontant === 15000;
+      const effectiveExpireLe = new Date(
+        nowDate.getTime() + (effectiveMonthly ? 30 : 365) * 24 * 3600 * 1000
+      ).toISOString();
+
+      if (found) {
+        found.expire_le = effectiveExpireLe;
+        found.plan = effectivePlan;
+        found.montant = effectiveMontant;
+        if (targetPharmaId) {
+          found.pharmacie_id = targetPharmaId;
+          found.pharmacy_id = targetPharmaId;
+        }
+      }
+
+      // 2) UPDATE abonnements SET statut='paye_valide', plan=..., montant=..., expire_le=now()+interval WHERE id=[id]
       const abnUpdatePayload: Record<string, any> = {
         statut: 'paye_valide',
+        plan: effectivePlan,
+        montant: effectiveMontant,
         code_validation: code,
-        expire_le: expireLe,
+        expire_le: effectiveExpireLe,
         updated_at: now,
       };
       if (targetPharmaId) {
-        abnUpdatePayload.pharmacy_id = targetPharmaId;
         abnUpdatePayload.pharmacie_id = targetPharmaId;
       }
 
-      const { error: abnErr } = await sb
+      let { data: updatedAbnRows, error: abnErr } = await sb
         .from('abonnements')
         .update(abnUpdatePayload)
-        .eq('id', demandeId);
+        .eq('id', demandeId)
+        .select('id');
 
       if (abnErr) {
-        await sb
+        console.warn(
+          '[EFA] UPDATE abonnements complet échoué, tentative minimale:',
+          abnErr.message
+        );
+        const minRes = await sb
           .from('abonnements')
           .update({
             statut: 'paye_valide',
-            expire_le: expireLe,
+            plan: effectivePlan,
+            montant: effectiveMontant,
+            expire_le: effectiveExpireLe,
           })
-          .eq('id', demandeId);
+          .eq('id', demandeId)
+          .select('id');
+        updatedAbnRows = minRes.data;
+        abnErr = minRes.error;
+      }
+
+      // Si aucune ligne touchée par id (ou si appel par pharmacie_id), essai par pharmacie_id
+      if (!abnErr && (!updatedAbnRows || updatedAbnRows.length === 0) && targetPharmaId) {
+        const byPidRes = await sb
+          .from('abonnements')
+          .update({
+            statut: 'paye_valide',
+            plan: effectivePlan,
+            montant: effectiveMontant,
+            expire_le: effectiveExpireLe,
+          })
+          .eq('pharmacie_id', targetPharmaId)
+          .select('id');
+        abnErr = byPidRes.error;
+      }
+
+      if (abnErr) {
+        dbOk = false;
+        dbErrorMsg = abnErr.message;
+        console.error('[EFA GARDE] Erreur UPDATE abonnements:', abnErr);
       }
 
       // 3) UPDATE pharmacies SET is_active=true WHERE id=pharmacie_id (sans toucher is_garde)
       if (targetPharmaId) {
-        const effectivePlan = abnRow?.plan || found?.plan || '';
         const isStar = isStarPlanName(effectivePlan);
         const pharmaUpdate: Record<string, any> = {
           is_active: true,
@@ -1758,21 +1896,37 @@ export async function validateSubscriptionPaymentAndGenerateCode(
           pharmaUpdate.etoile_doree = true;
           pharmaUpdate.is_premium = true;
         }
-        const { error: pharmaErr } = await sb
+        let { error: pharmaErr } = await sb
           .from('pharmacies')
           .update(pharmaUpdate)
           .eq('id', targetPharmaId);
+
         if (pharmaErr) {
-          await sb
+          console.warn(
+            '[EFA] UPDATE pharmacies complet échoué, fallback is_active=true:',
+            pharmaErr.message
+          );
+          const minPh = await sb
             .from('pharmacies')
             .update({ is_active: true })
             .eq('id', targetPharmaId);
+          pharmaErr = minPh.error;
+        }
+
+        if (pharmaErr) {
+          dbOk = false;
+          dbErrorMsg = dbErrorMsg
+            ? `${dbErrorMsg} | ${pharmaErr.message}`
+            : pharmaErr.message;
+          console.error('[EFA GARDE] Erreur UPDATE pharmacies:', pharmaErr);
         }
       }
     }
-  } catch (err) {
-    console.warn(
-      '[EFA] validateSubscriptionPaymentAndGenerateCode Supabase warning:',
+  } catch (err: any) {
+    dbOk = false;
+    dbErrorMsg = err?.message || String(err);
+    console.error(
+      '[EFA] validateSubscriptionPaymentAndGenerateCode Supabase error:',
       err
     );
   }
@@ -1784,7 +1938,7 @@ export async function validateSubscriptionPaymentAndGenerateCode(
   }
 
   notifyChange();
-  return { code, demande: found || null };
+  return { code, demande: found || null, ok: dbOk, error: dbErrorMsg };
 }
 
 /**
@@ -1917,21 +2071,30 @@ export async function fetchAbonnements(
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      let query = sb
+      const { data, error } = await sb
         .from('abonnements')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (pharmacyId) {
-        if (!isValidUuid(pharmacyId)) {
-          return [];
-        }
-        query = query.eq('pharmacy_id', pharmacyId);
-      }
-
-      const { data, error } = await query;
       if (!error && Array.isArray(data)) {
-        return data as Abonnement[];
+        const mapped = data.map((a: any) => ({
+          ...a,
+          pharmacy_id: a.pharmacy_id || a.pharmacie_id || undefined,
+          pharmacie_id: a.pharmacie_id || a.pharmacy_id || undefined,
+        })) as Abonnement[];
+
+        if (pharmacyId) {
+          return mapped.filter(
+            (a) =>
+              a.pharmacy_id === pharmacyId ||
+              a.pharmacie_id === pharmacyId ||
+              a.entreprise_id === pharmacyId
+          );
+        }
+        return mapped;
+      }
+      if (error) {
+        console.error('[EFA GARDE] fetchAbonnements error:', error.message);
       }
     }
   } catch (err) {
@@ -1967,28 +2130,38 @@ export function loadConversations(
   clientId?: string,
   pharmacyUserId?: string
 ): Conversation[] {
-  let all = [...memoryConversations].map((c) => ({
-    ...c,
-    pharmacy_id: c.pharmacy_id || (c as any).pharmacie_id || '',
-  }));
+  let all = [...memoryConversations].map((c) => {
+    const pid = c.pharmacy_id || c.pharmacie_id || '';
+    return {
+      ...c,
+      pharmacy_id: pid,
+      pharmacie_id: c.pharmacie_id || pid,
+    };
+  });
 
   all.sort((a, b) => {
-    const timeA = new Date(a.last_message_at || a.updated_at || 0).getTime();
-    const timeB = new Date(b.last_message_at || b.updated_at || 0).getTime();
+    const timeA = new Date(a.last_message_at || a.updated_at || a.created_at || 0).getTime();
+    const timeB = new Date(b.last_message_at || b.updated_at || b.created_at || 0).getTime();
     return timeB - timeA;
   });
 
   if (pharmacyUserId && pharmacieId) {
     return all.filter(
       (c) =>
-        c.pharmacy_user_id === pharmacyUserId || c.pharmacy_id === pharmacieId
+        c.pharmacy_user_id === pharmacyUserId ||
+        c.pharmacy_id === pharmacieId ||
+        c.pharmacie_id === pharmacieId
     );
   }
   if (pharmacieId) {
-    return all.filter((c) => c.pharmacy_id === pharmacieId);
+    return all.filter(
+      (c) => c.pharmacy_id === pharmacieId || c.pharmacie_id === pharmacieId
+    );
   }
   if (clientId) {
-    return all.filter((c) => c.client_id === clientId);
+    return all.filter(
+      (c) => c.client_id === clientId || c.admin_id === clientId
+    );
   }
   return all;
 }
@@ -2000,23 +2173,47 @@ export async function fetchConversations(
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      let query = sb
+      let { data, error } = await sb
         .from('conversations')
         .select('*')
         .order('last_message_at', { ascending: false });
 
-      if (pharmacieId) {
-        query = query.eq('pharmacy_id', pharmacieId);
-      }
-      if (clientId) {
-        query = query.eq('client_id', clientId);
+      if (error) {
+        const fallbackRes = await sb
+          .from('conversations')
+          .select('*')
+          .order('created_at', { ascending: false });
+        data = fallbackRes.data;
+        error = fallbackRes.error;
       }
 
-      const { data, error } = await query;
+      if (error) {
+        console.error('[EFA GARDE] fetchConversations error:', error.message);
+      }
+
       if (!error && Array.isArray(data)) {
-        memoryConversations = data as Conversation[];
+        const normalized: Conversation[] = data.map((row: any) => {
+          const pid = row.pharmacy_id || row.pharmacie_id || '';
+          return {
+            ...row,
+            pharmacy_id: pid,
+            pharmacie_id: row.pharmacie_id || pid,
+            client_id: row.client_id || row.admin_id || 'client',
+            admin_id: row.admin_id || undefined,
+          };
+        });
+
+        // Merge avec les conversations en mémoire si pas encore persistées
+        const seen = new Set(normalized.map((c) => c.id));
+        const merged = [...normalized];
+        for (const memC of memoryConversations) {
+          if (memC && memC.id && !seen.has(memC.id)) {
+            merged.push(memC);
+          }
+        }
+        memoryConversations = merged;
         notifyChange();
-        return memoryConversations;
+        return loadConversations(pharmacieId, clientId);
       }
     }
   } catch (err) {
@@ -2037,28 +2234,55 @@ async function ensureConversationInDB(conv: Conversation): Promise<void> {
     try {
       const sb = getSupabaseClient();
       if (!sb) return;
-      const { error } = await sb.from('conversations').insert([
-        {
-          id: conv.id,
-          client_id: conv.client_id,
-          pharmacy_id: conv.pharmacy_id,
-          pharmacy_user_id: conv.pharmacy_user_id || conv.pharmacy_id,
-          last_message: conv.last_message || '',
-          last_message_at: conv.last_message_at || conv.created_at,
-          unread_count_pharmacy: conv.unread_count_pharmacy || 0,
-          unread_count_client: conv.unread_count_client || 0,
-          is_blocked: Boolean(conv.is_blocked),
-          is_reported: Boolean(conv.is_reported),
-          created_at: conv.created_at,
-          updated_at: conv.updated_at,
-        },
-      ]);
+      const fullRow: Record<string, any> = {
+        id: conv.id,
+        client_id: conv.client_id,
+        pharmacy_id: conv.pharmacy_id,
+        pharmacie_id: conv.pharmacie_id || conv.pharmacy_id,
+        pharmacy_user_id: conv.pharmacy_user_id || conv.pharmacy_id,
+        last_message: conv.last_message || '',
+        last_message_at: conv.last_message_at || conv.created_at,
+        unread_count_pharmacy: conv.unread_count_pharmacy || 0,
+        unread_count_client: conv.unread_count_client || 0,
+        is_blocked: Boolean(conv.is_blocked),
+        is_reported: Boolean(conv.is_reported),
+        created_at: conv.created_at,
+        updated_at: conv.updated_at,
+      };
+      if (conv.admin_id) {
+        fullRow.admin_id = conv.admin_id;
+      }
+
+      let { error } = await sb.from('conversations').insert([fullRow]);
       if (
         error &&
         error.code !== '23505' &&
         !error.message?.includes('duplicate')
       ) {
-        console.warn('[EFA GARDE] INSERT conversations:', error.message);
+        console.warn(
+          '[EFA GARDE] INSERT conversations complet échoué, tentative core:',
+          error.message
+        );
+        const coreRes = await sb.from('conversations').insert([
+          {
+            id: conv.id,
+            client_id: conv.client_id,
+            pharmacy_id: conv.pharmacy_id,
+            pharmacy_user_id: conv.pharmacy_user_id || conv.pharmacy_id,
+            last_message: conv.last_message || '',
+            last_message_at: conv.last_message_at || conv.created_at,
+            created_at: conv.created_at,
+            updated_at: conv.updated_at,
+          },
+        ]);
+        error = coreRes.error;
+      }
+      if (
+        error &&
+        error.code !== '23505' &&
+        !error.message?.includes('duplicate')
+      ) {
+        console.error('[EFA GARDE] INSERT conversations:', error.message);
       }
     } catch (err) {
       console.warn('[EFA GARDE] ensureConversationInDB warning:', err);
@@ -2077,7 +2301,7 @@ export function getOrCreateConversation(
   const existing = memoryConversations.find(
     (c) =>
       c.client_id === clientId &&
-      (c.pharmacy_id === pharmacieId || (c as any).pharmacie_id === pharmacieId)
+      (c.pharmacy_id === pharmacieId || c.pharmacie_id === pharmacieId)
   );
 
   if (existing) {
@@ -2094,6 +2318,7 @@ export function getOrCreateConversation(
     id: `conv-${pharmacieId}-${clientId}`,
     client_id: clientId,
     pharmacy_id: pharmacieId,
+    pharmacie_id: pharmacieId,
     pharmacy_user_id: pharmacyUserId || pharmacieId,
     last_message: '',
     last_message_at: now,
@@ -2110,6 +2335,45 @@ export function getOrCreateConversation(
   // INSERT direct dans public.conversations (modèle exact user_consents)
   void ensureConversationInDB(newConv);
 
+  notifyChange();
+  return newConv;
+}
+
+export function getOrCreateSuperAdminConversation(
+  pharmacieId: string,
+  adminId = 'super-admin'
+): Conversation {
+  const existing = memoryConversations.find(
+    (c) =>
+      (c.pharmacy_id === pharmacieId || c.pharmacie_id === pharmacieId) &&
+      (c.client_id === 'super-admin' || c.admin_id === adminId || Boolean(c.admin_id))
+  );
+
+  if (existing) {
+    void ensureConversationInDB(existing);
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const newConv: Conversation = {
+    id: `conv-admin-${pharmacieId}`,
+    client_id: 'super-admin',
+    admin_id: adminId,
+    pharmacy_id: pharmacieId,
+    pharmacie_id: pharmacieId,
+    pharmacy_user_id: pharmacieId,
+    last_message: '',
+    last_message_at: now,
+    unread_count_pharmacy: 0,
+    unread_count_client: 0,
+    is_blocked: false,
+    is_reported: false,
+    created_at: now,
+    updated_at: now,
+  };
+
+  memoryConversations.unshift(newConv);
+  void ensureConversationInDB(newConv);
   notifyChange();
   return newConv;
 }
@@ -2131,8 +2395,19 @@ export async function fetchMessages(
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true });
 
+      if (error) {
+        console.error('[EFA GARDE] fetchMessages error:', error.message);
+      }
+
       if (!error && Array.isArray(data)) {
-        const msgs = (data as Message[]).filter((m) => !isMessageExpired(m));
+        const msgs = (data as any[])
+          .map((m) => ({
+            ...m,
+            sender: (m.sender || m.sender_type || 'client') as 'client' | 'pharma' | 'admin',
+            text: m.text || m.content || '',
+            content: m.content || m.text || '',
+          }))
+          .filter((m) => !isMessageExpired(m)) as Message[];
         memoryMessages[conversationId] = msgs;
         notifyChange();
         return msgs;
@@ -2146,7 +2421,7 @@ export async function fetchMessages(
 
 export function addMessage(
   conversationId: string,
-  sender: 'client' | 'pharma',
+  sender: 'client' | 'pharma' | 'admin',
   text: string,
   mediaOptions?: {
     type?: 'text' | 'image' | 'audio';
@@ -2154,7 +2429,7 @@ export function addMessage(
     audio_duration?: number;
     senderId?: string;
     receiverId?: string;
-    senderType?: 'client' | 'pharma' | 'system';
+    senderType?: 'client' | 'pharma' | 'admin' | 'system';
   }
 ): Message {
   const cIdx = memoryConversations.findIndex((c) => c.id === conversationId);
@@ -2179,15 +2454,17 @@ export function addMessage(
 
   const senderId =
     mediaOptions?.senderId ||
-    (sender === 'client'
+    (sender === 'admin'
+      ? conv?.admin_id || 'super-admin'
+      : sender === 'client'
       ? conv?.client_id || getOrCreateClientId()
-      : conv?.pharmacy_user_id || conv?.pharmacy_id || 'pharma-1');
+      : conv?.pharmacy_user_id || conv?.pharmacy_id || conv?.pharmacie_id || 'pharma-1');
 
   const receiverId =
     mediaOptions?.receiverId ||
-    (sender === 'client'
-      ? conv?.pharmacy_user_id || conv?.pharmacy_id || 'pharma-1'
-      : conv?.client_id || getOrCreateClientId());
+    (sender === 'pharma'
+      ? conv?.admin_id || conv?.client_id || getOrCreateClientId()
+      : conv?.pharmacy_user_id || conv?.pharmacy_id || conv?.pharmacie_id || 'pharma-1');
 
   const newMsg: Message = {
     id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -2222,10 +2499,10 @@ export function addMessage(
     memoryConversations[cIdx].last_message_at = createdAt;
     memoryConversations[cIdx].updated_at = createdAt;
 
-    if (sender === 'client') {
+    if (sender === 'client' || sender === 'admin') {
       memoryConversations[cIdx].unread_count_pharmacy =
         (memoryConversations[cIdx].unread_count_pharmacy || 0) + 1;
-      if (memoryConversations[cIdx].pharmacy_id) {
+      if (sender === 'client' && memoryConversations[cIdx].pharmacy_id) {
         try {
           recordClientContact(memoryConversations[cIdx].pharmacy_id);
         } catch {}
@@ -2250,7 +2527,7 @@ export function addMessage(
     } catch {}
   }
 
-  // 4. Synchronisation Supabase : attendre que `conversations` existe avant INSERT `messages`
+  // 4. Synchronisation Supabase : attendre que `conversations` existe avant INSERT `messages` + refetch
   void (async () => {
     try {
       const sb = getSupabaseClient();
@@ -2265,7 +2542,7 @@ export function addMessage(
         }
       }
 
-      const { error: msgErr } = await sb.from('messages').insert([
+      let { error: msgErr } = await sb.from('messages').insert([
         {
           id: newMsg.id,
           conversation_id: newMsg.conversation_id,
@@ -2283,8 +2560,26 @@ export function addMessage(
           expires_at: newMsg.expires_at,
         },
       ]);
+
       if (msgErr) {
-        console.warn('[EFA GARDE] INSERT messages:', msgErr.message);
+        console.warn('[EFA GARDE] INSERT messages complet échoué, tentative core:', msgErr.message);
+        const coreMsgRes = await sb.from('messages').insert([
+          {
+            id: newMsg.id,
+            conversation_id: newMsg.conversation_id,
+            sender_id: newMsg.sender_id,
+            receiver_id: newMsg.receiver_id,
+            sender: newMsg.sender,
+            content: newMsg.content,
+            text: newMsg.text,
+            created_at: newMsg.created_at,
+          },
+        ]);
+        msgErr = coreMsgRes.error;
+      }
+
+      if (msgErr) {
+        console.error('[EFA GARDE] INSERT messages:', msgErr.message);
       }
 
       if (conv) {
@@ -2302,6 +2597,9 @@ export function addMessage(
           console.warn('[EFA GARDE] UPDATE conversations:', convUpdateErr.message);
         }
       }
+
+      await fetchMessages(conversationId);
+      await fetchConversations();
     } catch (err) {
       console.warn('[EFA GARDE] addMessage Supabase warning:', err);
     }
@@ -2313,7 +2611,7 @@ export function addMessage(
 
 export function markConversationAsRead(
   conversationId: string,
-  readerType: 'pharma' | 'client',
+  readerType: 'pharma' | 'client' | 'admin',
   readerId?: string
 ) {
   const cIdx = memoryConversations.findIndex((c) => c.id === conversationId);
@@ -2330,11 +2628,11 @@ export function markConversationAsRead(
     if (!m.is_read) {
       if (
         readerType === 'pharma' &&
-        (m.sender === 'client' || m.receiver_id === readerId)
+        (m.sender === 'client' || m.sender === 'admin' || m.receiver_id === readerId)
       ) {
         m.is_read = true;
       } else if (
-        readerType === 'client' &&
+        (readerType === 'client' || readerType === 'admin') &&
         (m.sender === 'pharma' || m.receiver_id === readerId)
       ) {
         m.is_read = true;
@@ -2961,7 +3259,12 @@ export function initSupabaseRealtime(): void {
                   conversation_id: convId,
                   sender:
                     newMsg.sender ||
-                    (newMsg.sender_type === 'pharma' ? 'pharma' : 'client'),
+                    (newMsg.sender_type === 'pharma'
+                      ? 'pharma'
+                      : newMsg.sender_type === 'admin'
+                      ? 'admin'
+                      : 'client'),
+                  sender_type: newMsg.sender_type || newMsg.sender || 'client',
                   sender_id: newMsg.sender_id,
                   receiver_id: newMsg.receiver_id,
                   text: newMsg.text || newMsg.content || '',

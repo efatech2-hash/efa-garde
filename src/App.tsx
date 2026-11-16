@@ -248,6 +248,11 @@ export default function App() {
 
   // 3. SECURITE : Routes pharmacien protégées : redirige vers /pharma/login si rôle invalide ou non connecté
   useEffect(() => {
+    const isStatsRoute =
+      currentPath === '/pharma/stats' ||
+      currentPath === '/stats' ||
+      currentPath === '/statistiques';
+
     const isPharmaRestrictedRoute =
       currentPath === '/ajouter-pharmacie' ||
       currentPath === '/pro' ||
@@ -258,15 +263,14 @@ export default function App() {
       currentPath === '/abonnement' ||
       currentPath === '/abonnements' ||
       currentPath === '/qr' ||
-      currentPath === '/profil' ||
-      currentPath === '/pharma/stats' ||
-      currentPath === '/stats' ||
-      currentPath === '/statistiques';
+      currentPath === '/profil';
 
     if (isPharmaRestrictedRoute && !isPharmaUser) {
       navigateTo('/pharma/login');
+    } else if (isStatsRoute && !isPharmaUser && !isSuperAdminUser) {
+      navigateTo('/pharma/login');
     }
-  }, [currentPath, isPharmaUser]);
+  }, [currentPath, isPharmaUser, isSuperAdminUser]);
 
   // SECURITE : /enregistrer-pharmacie bloqué si pas de token paiement 25k valide (redirect /paiement-inscription)
   useEffect(() => {
@@ -646,6 +650,7 @@ export default function App() {
       <SuperAdminPage
         onBackToMap={() => navigateTo('/home')}
         onNavigateToLogin={() => navigateTo('/pharma/login')}
+        onNavigateToStats={() => navigateTo('/statistiques')}
       />
     );
   } else if (currentPath === '/admin' || currentPath === '/admin/pharmacies') {
@@ -662,6 +667,7 @@ export default function App() {
         <SuperAdminPage
           onBackToMap={() => navigateTo('/home')}
           onNavigateToLogin={() => navigateTo('/pharma/login')}
+          onNavigateToStats={() => navigateTo('/statistiques')}
         />
       );
     }
@@ -785,7 +791,7 @@ export default function App() {
     currentPath === '/stats' ||
     currentPath === '/statistiques'
   ) {
-    if (isPharmaUser) {
+    if (isPharmaUser || isSuperAdminUser) {
       content = (
         <PharmaStatsPage
           pharmacies={pharmacies}
@@ -927,11 +933,14 @@ export default function App() {
               <PWAInstallButton />
 
               {/* BOUTON STATISTIQUES PHARMA */}
-              {isPharmaUser && (
+              {(isPharmaUser || isSuperAdminUser) && (
                 <button
-                  onClick={() => navigateTo('/pharma/stats')}
+                  type="button"
+                  onClick={() => navigateTo('/statistiques')}
                   className={`flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 ${
-                    currentPath === '/pharma/stats' || currentPath === '/stats'
+                    currentPath === '/statistiques' ||
+                    currentPath === '/pharma/stats' ||
+                    currentPath === '/stats'
                       ? 'bg-[#0A3D8F] text-white border-blue-400'
                       : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
                   }`}

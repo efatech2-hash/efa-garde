@@ -15,6 +15,7 @@ import {
   getSupabaseClient,
   fetchConversations,
   fetchMessages,
+  getOrCreateSuperAdminConversation,
 } from '../services/store';
 import { compressChatImage } from '../utils/imageCompressor';
 import { playNotificationSound } from '../services/sound';
@@ -255,7 +256,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     }).catch(() => {});
   }, [selectedConv?.id, currentPharma?.id]);
 
-  // Subscribe to realtime store & sound notifications
+  // Subscribe to realtime store, sound notifications & 5s fallback sync
   useEffect(() => {
     if (!currentPharma) return;
 
@@ -275,7 +276,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
         const msgs = loadMessages(selectedConv.id);
         if (msgs.length > prevMsgCountRef.current) {
           const lastMsg = msgs[msgs.length - 1];
-          if (lastMsg.sender === 'client') {
+          if (lastMsg.sender === 'client' || lastMsg.sender === 'admin') {
             if (soundEnabled) {
               playNotificationSound();
             }
@@ -287,7 +288,22 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
       }
     });
 
+    const pollInterval = setInterval(() => {
+      fetchConversations(currentPharma.id).catch(() => {});
+      if (selectedConv) {
+        fetchMessages(selectedConv.id)
+          .then((serverMsgs) => {
+            if (serverMsgs) {
+              setMessages(serverMsgs);
+              prevMsgCountRef.current = serverMsgs.length;
+            }
+          })
+          .catch(() => {});
+      }
+    }, 5000);
+
     return () => {
+      clearInterval(pollInterval);
       unsubscribePresence();
       unsubscribeStore();
     };
@@ -347,7 +363,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
       addMessage(selectedConv.id, 'pharma', text, {
         type: 'text',
         senderId: currentPharma?.id || 'pharma-1',
-        receiverId: selectedConv.client_id,
+        receiverId: selectedConv.admin_id || selectedConv.client_id,
       });
       setInputText('');
       setTimeout(() => {
@@ -356,6 +372,16 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     } catch (err: any) {
       showToast(err?.message || 'Erreur envoi message');
     }
+  };
+
+  const handleOpenSuperAdminChat = () => {
+    if (!currentPharma) return;
+    const conv = getOrCreateSuperAdminConversation(currentPharma.id);
+    refreshConvs();
+    setSelectedConv(conv);
+    fetchMessages(conv.id).then((serverMsgs) => {
+      if (serverMsgs) setMessages(serverMsgs);
+    }).catch(() => {});
   };
 
   // Photo handlers
@@ -565,14 +591,18 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
             selectedConv ? 'hidden md:flex' : 'flex'
           } w-full md:w-80 lg:w-96 border-r border-slate-800 flex-col bg-slate-900/60 min-h-0 h-full shrink-0 overflow-hidden`}
         >
-          <div className="p-3 border-b border-slate-800 bg-slate-800/40 flex items-center justify-between shrink-0">
+          <div className="p-3 border-b border-slate-800 bg-slate-800/40 flex items-center justify-between gap-2 shrink-0">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
               Conversations ({conversations.length})
             </span>
-            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              En direct
-            </span>
+            <button
+              type="button"
+              onClick={handleOpenSuperAdminChat}
+              className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-black cursor-pointer transition-colors"
+              title="Discuter avec le Super Admin"
+            >
+              👑 Super Admin
+            </button>
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
@@ -583,6 +613,8 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
             ) : (
               conversations.map((c) => {
                 const isSelected = selectedConv?.id === c.id;
+                const isAdminConv =
+                  c.client_id === 'super-admin' || Boolean(c.admin_id);
                 const formattedTime = c.updated_at
                   ? new Date(c.updated_at).toLocaleTimeString('fr-FR', {
                       hour: '2-digit',
@@ -602,11 +634,17 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                   >
                     <div className="flex items-center justify-between gap-1 mb-1">
                       <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">
-                          <User className="w-3.5 h-3.5" />
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                          isAdminConv
+                            ? 'bg-amber-500/20 text-amber-300'
+                            : 'bg-emerald-500/20 text-emerald-400'
+                        }`}>
+                          {isAdminConv ? '👑' : <User className="w-3.5 h-3.5" />}
                         </div>
-                        <span className="text-xs font-bold text-white truncate max-w-[140px]">
-                          Patient {c.client_id.replace('client-', '#')}
+                        <span className="text-xs font-bold text-white truncate max-w-[160px]">
+                          {isAdminConv
+                            ? 'Super Admin EFA'
+                            : `Patient ${c.client_id.replace('client-', '#')}`}
                         </span>
                       </div>
                       <span className="text-[10px] text-slate-400 shrink-0">{formattedTime}</span>
@@ -648,7 +686,9 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                   </div>
                   <div className="flex flex-col min-w-0 max-w-[60vw] sm:max-w-none justify-center overflow-hidden">
                     <h3 className="text-sm font-bold text-white truncate max-w-[60vw] sm:max-w-none">
-                      Patient {selectedConv.client_id.replace('client-', '#')}
+                      {selectedConv.client_id === 'super-admin' || selectedConv.admin_id
+                        ? '👑 Super Admin EFA Garde'
+                        : `Patient ${selectedConv.client_id.replace('client-', '#')}`}
                     </h3>
                     <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1 min-w-0 flex-wrap text-xs">
                       <span className="text-[11px] text-blue-100 font-medium truncate max-w-[60vw] sm:max-w-none">

@@ -21,6 +21,11 @@ import {
   fetchPendingPharmacies,
   approvePharmacySuperAdmin,
   rejectPharmacySuperAdmin,
+  fetchConversations,
+  fetchMessages,
+  getOrCreateSuperAdminConversation,
+  addMessage,
+  markConversationAsRead,
 } from '../services/store';
 import { checkRateLimit } from '../utils/security';
 import { Logo } from '../components/Logo';
@@ -58,6 +63,7 @@ import {
   UserCheck,
   Trash2,
   Send,
+  BarChart3,
 } from 'lucide-react';
 
 const SUPER_ADMIN_TOKEN_KEY = 'super_admin_token';
@@ -108,11 +114,13 @@ function verifySuperAdminJWT(token: string | null): boolean {
 interface SuperAdminPageProps {
   onBackToMap: () => void;
   onNavigateToLogin: () => void;
+  onNavigateToStats?: () => void;
 }
 
 export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   onBackToMap,
   onNavigateToLogin,
+  onNavigateToStats,
 }) => {
   const superAdminEmail = (
     import.meta.env.VITE_SUPER_ADMIN_EMAIL ||
@@ -138,8 +146,13 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
   const [showGatePassword, setShowGatePassword] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
 
-  // Navigation Onglets Super Admin ('souscriptions' | 'abonnements' | 'pharmacies' | 'signalements')
-  const [activeTab, setActiveTab] = useState<'souscriptions' | 'abonnements' | 'pharmacies' | 'signalements'>('pharmacies');
+  // Navigation Onglets Super Admin ('souscriptions' | 'abonnements' | 'pharmacies' | 'messages' | 'signalements')
+  const [activeTab, setActiveTab] = useState<'souscriptions' | 'abonnements' | 'pharmacies' | 'messages' | 'signalements'>('pharmacies');
+
+  // Messagerie Super Admin <-> Pharmacies
+  const [selectedChatPharma, setSelectedChatPharma] = useState<Pharmacie | null>(null);
+  const [adminChatMessages, setAdminChatMessages] = useState<Message[]>([]);
+  const [adminMsgText, setAdminMsgText] = useState('');
 
   // Demandes de paiement 25.000 FCFA & codes 4 chiffres
   const [demandesAbonnement, setDemandesAbonnement] = useState<DemandeAbonnement[]>(() => loadDemandesAbonnement());
@@ -217,6 +230,10 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
       refreshClientsCount();
       refreshDemandes();
       setPendingPharmacies(loadPendingPharmacies());
+      if (selectedChatPharma) {
+        const conv = getOrCreateSuperAdminConversation(selectedChatPharma.id);
+        setAdminChatMessages(loadMessages(conv.id));
+      }
     });
     fetchPharmacies().then((data) => setPharmacies(data)).catch(() => {});
     refreshSignalements();
@@ -224,7 +241,46 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     refreshDemandes();
     refreshPending();
     return () => unsub();
-  }, []);
+  }, [selectedChatPharma?.id]);
+
+  // Synchronisation messagerie Super Admin <-> Pharmacie
+  useEffect(() => {
+    if (activeTab !== 'messages') return;
+    const targetPharma = selectedChatPharma || pharmacies[0] || null;
+    if (!targetPharma) return;
+    if (!selectedChatPharma) {
+      setSelectedChatPharma(targetPharma);
+    }
+    const conv = getOrCreateSuperAdminConversation(targetPharma.id);
+    markConversationAsRead(conv.id, 'admin', 'super-admin');
+    setAdminChatMessages(loadMessages(conv.id));
+    fetchConversations().catch(() => {});
+    fetchMessages(conv.id)
+      .then((msgs) => setAdminChatMessages(msgs))
+      .catch(() => {});
+
+    const poll = setInterval(() => {
+      fetchMessages(conv.id)
+        .then((msgs) => setAdminChatMessages(msgs))
+        .catch(() => {});
+    }, 5000);
+
+    return () => clearInterval(poll);
+  }, [activeTab, selectedChatPharma?.id, pharmacies.length]);
+
+  const handleSendAdminMessage = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = adminMsgText.trim();
+    if (!clean || !selectedChatPharma) return;
+    const conv = getOrCreateSuperAdminConversation(selectedChatPharma.id);
+    addMessage(conv.id, 'admin', clean, {
+      senderId: 'super-admin',
+      receiverId: selectedChatPharma.id,
+      senderType: 'admin',
+    });
+    setAdminMsgText('');
+    setAdminChatMessages(loadMessages(conv.id));
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -338,7 +394,12 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     setGeneratedCodes((prev) => ({ ...prev, [demande.id]: res.code }));
     await Promise.all([refreshDemandes(), fetchPharmacies()]);
     setPharmacies(loadPharmacies());
-    showToast(`✅ Activé ! "${demande.nom_pharmacie}" (Code : ${res.code})`);
+    if (!res.ok) {
+      console.error('[SuperAdmin] Erreur validation abonnement:', res.error);
+      showToast(`⚠️ Erreur Supabase : ${res.error || 'Échec mise à jour'}`);
+    } else {
+      showToast(`✅ Activé ! "${demande.nom_pharmacie}" (Code : ${res.code})`);
+    }
   };
 
   // Action : Refuser une demande d'abonnement
@@ -671,6 +732,23 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
+              onClick={() => {
+                if (onNavigateToStats) {
+                  onNavigateToStats();
+                } else {
+                  window.location.hash = '/statistiques';
+                }
+              }}
+              className="px-3 py-2 rounded-xl bg-[#0A3D8F] hover:bg-blue-700 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+              title="Ouvrir les statistiques"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Statistiques</span>
+            </button>
+
+            <button
+              type="button"
               onClick={onBackToMap}
               className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
             >
@@ -679,6 +757,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
             </button>
 
             <button
+              type="button"
               onClick={handleLogout}
               className="px-3 py-2 rounded-xl bg-red-950/50 hover:bg-red-900/60 border border-red-500/30 text-red-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
               title="Déconnexion"
@@ -786,6 +865,19 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
           >
             <Building2 className="w-4 h-4" />
             <span>Pharmacies Validées ({totalCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('messages')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'messages'
+                ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Messages Pharmacies</span>
           </button>
 
           <button
@@ -1411,6 +1503,152 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
+    {/* CONTENU ONGLET : MESSAGERIE RECIPROQUE SUPER ADMIN <-> PHARMACIES */}
+    {activeTab === 'messages' && (
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-xl overflow-hidden flex flex-col md:flex-row min-h-[480px] max-h-[72vh] animate-in fade-in">
+        {/* Liste Pharmacies */}
+        <div className="w-full md:w-72 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col bg-slate-950/60 overflow-y-auto max-h-56 md:max-h-none">
+          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
+            <span className="text-xs font-black uppercase tracking-wider text-sky-400">
+              Pharmacies ({pharmacies.length})
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                fetchPharmacies().then(setPharmacies).catch(() => {});
+                fetchConversations().catch(() => {});
+              }}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+              title="Actualiser"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="p-2 space-y-1.5">
+            {pharmacies.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500">
+                Aucune pharmacie chargée.
+              </div>
+            ) : (
+              pharmacies.map((ph) => {
+                const isSelected = selectedChatPharma?.id === ph.id;
+                return (
+                  <button
+                    key={ph.id}
+                    type="button"
+                    onClick={() => setSelectedChatPharma(ph)}
+                    className={`w-full text-left p-3 rounded-2xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-sky-500/20 border-sky-400 text-white'
+                        : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-xs truncate">{ph.nom}</div>
+                    <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
+                      {ph.phone || ph.tel || ph.quartier || 'Lomé'}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Fil de discussion bidirectionnel */}
+        <div className="flex-1 flex flex-col bg-slate-950/40 min-h-[340px]">
+          {selectedChatPharma ? (
+            <>
+              <div className="p-3.5 border-b border-slate-800 bg-slate-900/80 flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    👑 Super Admin ↔ 🏥 {selectedChatPharma.nom}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Messagerie directe réciproque • Synchronisation Supabase
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const conv = getOrCreateSuperAdminConversation(selectedChatPharma.id);
+                    fetchMessages(conv.id).then(setAdminChatMessages).catch(() => {});
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Actualiser</span>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                {adminChatMessages.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500 text-xs">
+                    Aucun message échangé avec {selectedChatPharma.nom}. Écrivez ci-dessous.
+                  </div>
+                ) : (
+                  adminChatMessages.map((m) => {
+                    const isAdminSender = m.sender === 'admin' || m.sender_type === 'admin';
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex flex-col ${isAdminSender ? 'items-end' : 'items-start'}`}
+                      >
+                        <div
+                          className={`max-w-[80%] px-3.5 py-2 rounded-2xl text-xs shadow ${
+                            isAdminSender
+                              ? 'bg-sky-600 text-white rounded-br-none'
+                              : 'bg-slate-800 text-slate-100 border border-slate-700 rounded-bl-none'
+                          }`}
+                        >
+                          <div className="text-[10px] font-bold opacity-75 mb-0.5">
+                            {isAdminSender ? '👑 Super Admin' : `🏥 ${selectedChatPharma.nom}`}
+                          </div>
+                          <p className="whitespace-pre-wrap break-words leading-relaxed">
+                            {m.text || m.content}
+                          </p>
+                          <div className="text-[9px] opacity-70 mt-1 text-right">
+                            {new Date(m.created_at).toLocaleTimeString('fr-FR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <form
+                onSubmit={handleSendAdminMessage}
+                className="p-3 border-t border-slate-800 bg-slate-900 flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={adminMsgText}
+                  onChange={(e) => setAdminMsgText(e.target.value)}
+                  placeholder={`Message pour ${selectedChatPharma.nom}...`}
+                  className="flex-1 h-11 bg-slate-950 text-white px-4 rounded-xl border border-slate-700 text-sm focus:outline-none focus:border-sky-400"
+                />
+                <button
+                  type="submit"
+                  disabled={!adminMsgText.trim()}
+                  className="h-11 px-4 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Envoyer</span>
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8 text-center text-slate-500 text-xs">
+              Sélectionnez une pharmacie à gauche pour démarrer la discussion.
             </div>
           )}
         </div>

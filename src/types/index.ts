@@ -93,7 +93,9 @@ export interface Conversation {
   id: string;
   client_id: string;
   pharmacy_id: string;
+  pharmacie_id?: string;
   pharmacy_user_id?: string;
+  admin_id?: string;
   last_message?: string;
   last_message_at?: string;
   unread_count_pharmacy?: number;
@@ -112,8 +114,8 @@ export interface Message {
   conversation_id: string;
   sender_id?: string;
   receiver_id?: string;
-  sender_type?: 'client' | 'pharma' | 'system';
-  sender: 'client' | 'pharma';
+  sender_type?: 'client' | 'pharma' | 'admin' | 'system';
+  sender: 'client' | 'pharma' | 'admin';
   content?: string;
   text: string;
   is_read?: boolean;

@@ -40,11 +40,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             id: 'stats',
             label: 'Stats',
             icon: BarChart3,
-            path: '/pharma/stats',
+            path: '/statistiques',
             isActive:
+              currentPath === '/statistiques' ||
               currentPath === '/pharma/stats' ||
-              currentPath === '/stats' ||
-              currentPath === '/statistiques',
+              currentPath === '/stats',
           },
         ]
       : []),

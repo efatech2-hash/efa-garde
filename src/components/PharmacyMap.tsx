@@ -75,6 +75,8 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
 
+    console.log('pharmacies', pharmacies);
+
     // Remove old markers not in current list
     markersRef.current.forEach((marker, id) => {
       if (!pharmacies.find((p) => p.id === id)) {
@@ -201,6 +203,10 @@ export const PharmacyMap: React.FC<PharmacyMapProps> = ({
       }
     });
     map.invalidateSize();
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+    return () => clearTimeout(timer);
   }, [pharmacies, onSelectPharmacy, userPosition]);
 
   // Update user position marker (Point BLEU "Vous êtes ici" comme Uber) + Lignes pointillées vers les 3 plus proches

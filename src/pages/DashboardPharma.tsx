@@ -397,7 +397,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
           {/* Quick Actions & Status */}
           <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
             <button
-              onClick={() => onNavigate('pharma/stats')}
+              onClick={() => onNavigate('/statistiques')}
               className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-[#0A3D8F]/25 hover:bg-[#0A3D8F]/40 text-blue-300 hover:text-white border border-blue-500/40 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
               title="Consulter les statistiques clients & affluence"
             >
@@ -796,7 +796,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
             </div>
 
             <button
-              onClick={() => onNavigate('pharma/stats')}
+              onClick={() => onNavigate('/statistiques')}
               className="px-3.5 py-1.5 rounded-xl bg-[#0A3D8F] hover:bg-blue-900 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
             >
               <span>Voir détails & graphiques</span>
@@ -875,7 +875,7 @@ export const DashboardPharma: React.FC<DashboardPharmaProps> = ({
           </div>
 
           <button
-            onClick={() => onNavigate('pharma/stats')}
+            onClick={() => onNavigate('/statistiques')}
             className="w-full py-3 rounded-2xl bg-[#0A3D8F] hover:bg-blue-900 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
           >
             <BarChart3 className="w-4 h-4" />

@@ -37,18 +37,28 @@ export const PharmaStatsPage: React.FC<PharmaStatsPageProps> = ({
   onNavigate,
 }) => {
   const session = getSession();
+  const isSuperAdmin = Boolean(
+    localStorage.getItem('super_admin_token') ||
+      localStorage.getItem('is_super_admin') === 'true'
+  );
   const targetId =
     session?.pharmaId ||
     activePharmaId ||
     localStorage.getItem('efa_active_pharma_id') ||
-    pharmacies[0]?.id;
+    pharmacies[0]?.id ||
+    'global';
 
   const currentPharma =
-    pharmacies.find((p) => p.id === targetId) || pharmacies[0];
+    pharmacies.find((p) => p.id === targetId) || pharmacies[0] || null;
+
+  const displayPharmaId = currentPharma?.id || targetId || 'global';
+  const displayPharmaNom =
+    currentPharma?.nom ||
+    (isSuperAdmin ? 'Statistiques Globales EFA Garde' : 'Mon Officine');
 
   const [period, setPeriod] = useState<'7d' | '30d'>('7d');
   const [stats, setStats] = useState<PharmacyStatsSummary>(() =>
-    getPharmacyStats(currentPharma?.id || 'pharma-1')
+    getPharmacyStats(displayPharmaId)
   );
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
@@ -57,14 +67,13 @@ export const PharmaStatsPage: React.FC<PharmaStatsPageProps> = ({
 
   // Reload stats whenever store changes or pharmacy changes
   useEffect(() => {
-    if (!currentPharma?.id) return;
     const update = () => {
-      setStats(getPharmacyStats(currentPharma.id));
+      setStats(getPharmacyStats(displayPharmaId));
     };
     update();
     const unsub = subscribeToStore(update);
     return () => unsub();
-  }, [currentPharma?.id]);
+  }, [displayPharmaId]);
 
   // Chart.js Rendering logic
   useEffect(() => {
@@ -160,35 +169,37 @@ export const PharmaStatsPage: React.FC<PharmaStatsPageProps> = ({
   }, [stats, period]);
 
   const handleSimulateContact = () => {
-    if (!currentPharma) return;
-    recordClientContact(currentPharma.id);
+    recordClientContact(displayPharmaId);
     setFeedbackMsg('+1 contact client enregistré en direct !');
     setTimeout(() => setFeedbackMsg(null), 3000);
   };
 
-  if (!currentPharma) {
-    return (
-      <div className="p-8 text-center text-slate-400">
-        Chargement des statistiques...
-      </div>
-    );
-  }
-
   return (
     <PharmaLayout
       role={session?.role}
-      pharmaNom={currentPharma.nom}
+      pharmaNom={displayPharmaNom}
       onRefreshRole={() => {}}
     >
       <div className="w-full max-w-full overflow-x-hidden px-3 sm:px-6 py-4 space-y-6 pb-28 flex flex-col animate-in fade-in duration-200">
         {/* Navigation & Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <button
-            onClick={() => onNavigate('/pharma/dashboard')}
+            type="button"
+            onClick={() =>
+              onNavigate(
+                isSuperAdmin && !session?.pharmaId
+                  ? '/super/admin'
+                  : '/pharma/dashboard'
+              )
+            }
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold transition-all cursor-pointer border border-slate-700"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Retour Dashboard</span>
+            <span>
+              {isSuperAdmin && !session?.pharmaId
+                ? 'Retour Super Admin'
+                : 'Retour Dashboard'}
+            </span>
           </button>
 
           <div className="flex items-center gap-2">
@@ -211,7 +222,7 @@ export const PharmaStatsPage: React.FC<PharmaStatsPageProps> = ({
                   Rapports & Fréquentation
                 </span>
                 <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700 font-mono">
-                  {currentPharma.nom}
+                  {displayPharmaNom}
                 </span>
               </div>
               <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
@@ -343,7 +354,7 @@ export const PharmaStatsPage: React.FC<PharmaStatsPageProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Nombre de patients ayant contacté {currentPharma.nom} (chat en direct & appels).
+                Nombre de patients ayant contacté {displayPharmaNom} (chat en direct & appels).
               </p>
             </div>
 

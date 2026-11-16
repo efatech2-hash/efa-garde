@@ -287,7 +287,19 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
       }
     );
 
+    const poll = setInterval(() => {
+      fetchMessages(conversation.id)
+        .then((serverMsgs) => {
+          if (serverMsgs) {
+            setMessages(serverMsgs);
+            prevMessagesCountRef.current = serverMsgs.length;
+          }
+        })
+        .catch(() => {});
+    }, 5000);
+
     return () => {
+      clearInterval(poll);
       unsubscribeStore();
       unsubscribePresence();
     };
@@ -1132,7 +1144,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
                   {/* 5. [➤ envoyer] */}
                   <button
                     type="button"
-                    disabled={!inputText.trim() || isSending}
+                    disabled={!inputText.trim()}
                     onClick={() => handleSendText()}
                     className="w-10 h-10 sm:w-11 sm:h-11 min-w-[40px] min-h-[40px] rounded-full bg-[#0A3D8F] hover:bg-[#082e6d] disabled:opacity-40 disabled:hover:bg-[#0A3D8F] text-white flex items-center justify-center shrink-0 shadow-md transition-all active:scale-95 cursor-pointer"
                     title="Envoyer"
