@@ -164,6 +164,31 @@ export default function App() {
   const activePharma =
     pharmacies.find((p) => p.id === activePharmaId) || pharmacies[0];
 
+  // Auto-aligne activePharmaId vers une vraie pharmacie Supabase (évite de rester sur 'pharma-1')
+  useEffect(() => {
+    if (pharmacies.length === 0) return;
+    const isMatched = pharmacies.some((p) => p.id === activePharmaId);
+    if (!isMatched) {
+      const sess = getSession();
+      const bySessionId = sess?.pharmaId
+        ? pharmacies.find((p) => p.id === sess.pharmaId)
+        : undefined;
+      const byEmail = sess?.email
+        ? pharmacies.find(
+            (p) =>
+              p.email_pro &&
+              p.email_pro.toLowerCase() === sess.email?.toLowerCase()
+          )
+        : undefined;
+      const resolved = bySessionId || byEmail || pharmacies[0];
+      if (resolved?.id) {
+        setActivePharmaId(resolved.id);
+        localStorage.setItem('pharma_id', resolved.id);
+        localStorage.setItem('efa_active_pharma_id', resolved.id);
+      }
+    }
+  }, [pharmacies, activePharmaId]);
+
   const storedRole =
     localStorage.getItem('efa_garde_role') ||
     localStorage.getItem('role') ||

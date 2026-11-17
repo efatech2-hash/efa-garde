@@ -267,35 +267,60 @@ export function purgeDemoData(): void {
   );
 }
 
+export function getPharmacyListTier(p: Partial<Pharmacie> | null | undefined): 0 | 1 | 2 {
+  if (!p) return 2;
+  const planStr = String(p.plan || '').toLowerCase();
+  const subPlanStr = String(p.subscription_plan || '').toLowerCase();
+
+  // 0 = JAUNE (PLAN STAR mensuel 15.000F + PLAN STAR annuel 140.000F)
+  const isStarYellow = Boolean(
+    p.etoile_doree ||
+      p.is_premium ||
+      subPlanStr === 'premium' ||
+      planStr === 'populaire_mensuel' ||
+      planStr === 'populaire_annuel' ||
+      planStr.includes('star') ||
+      planStr === 'top'
+  );
+  if (isStarYellow) return 0;
+
+  // 1 = VERT (90.000F/an / Enregistrement 25.000F / abonnement actif standard)
+  const isPaidGreen = Boolean(
+    p.subscription_status === 'active' ||
+      p.is_registered ||
+      subPlanStr === 'basic' ||
+      planStr === 'register' ||
+      planStr === 'annual' ||
+      planStr === '60k' ||
+      planStr === '90k' ||
+      planStr.includes('enregistrement') ||
+      planStr.includes('annuel') ||
+      planStr.includes('annual')
+  );
+  if (isPaidGreen) return 1;
+
+  // 2 = GRIS (Gratuit / sans abonnement)
+  return 2;
+}
+
 export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
   return [...list].sort((a, b) => {
-    const isPopA = Boolean(
-      a.is_premium ||
-        a.etoile_doree ||
-        a.plan === 'populaire_mensuel' ||
-        a.plan === 'populaire_annuel'
-    );
-    const isPopB = Boolean(
-      b.is_premium ||
-        b.etoile_doree ||
-        b.plan === 'populaire_mensuel' ||
-        b.plan === 'populaire_annuel'
-    );
+    const tierA = getPharmacyListTier(a);
+    const tierB = getPharmacyListTier(b);
 
-    // 1. is_premium / POPULAIRE first
-    if (isPopA && !isPopB) return -1;
-    if (!isPopA && isPopB) return 1;
+    // 1. Hiérarchie stricte : Jaunes (0) > Verts (1) > Gris (2)
+    if (tierA !== tierB) return tierA - tierB;
 
-    // 2. position (asc, 0 is at top)
-    const posA = a.position !== undefined ? a.position : 999;
-    const posB = b.position !== undefined ? b.position : 999;
-    if (posA !== posB) return posA - posB;
+    // 2. Pour PLAN STAR : position (asc) puis etoile_doree
+    if (tierA === 0) {
+      const posA = a.position !== undefined ? a.position : 999;
+      const posB = b.position !== undefined ? b.position : 999;
+      if (posA !== posB) return posA - posB;
+      if (a.etoile_doree && !b.etoile_doree) return -1;
+      if (!a.etoile_doree && b.etoile_doree) return 1;
+    }
 
-    // 3. etoile_doree (desc)
-    if (a.etoile_doree && !b.etoile_doree) return -1;
-    if (!a.etoile_doree && b.etoile_doree) return 1;
-
-    // 4. alphabetical
+    // 3. Ordre alphabétique
     return (a.nom || '').localeCompare(b.nom || '');
   });
 }
@@ -1451,7 +1476,10 @@ export function getClientDisplayName(clientId: string): string {
     (c) =>
       c.id === clientId ||
       c.id === normalizedTarget ||
-      `client-${c.id}` === clientId
+      `client-${c.id}` === clientId ||
+      c.telephone === normalizedTarget ||
+      c.numero_whatsapp === normalizedTarget ||
+      c.numero === normalizedTarget
   );
 
   if (matched) {
@@ -2351,11 +2379,15 @@ export const MS_24_HOURS = 24 * 60 * 60 * 1000;
 
 export function isMessageExpired(m: Message): boolean {
   const now = Date.now();
-  if (m.expires_at) {
-    return new Date(m.expires_at).getTime() <= now;
-  }
   const created = new Date(m.created_at).getTime();
-  return now - created >= MS_24_HOURS;
+  if (Number.isFinite(created) && now - created >= MS_24_HOURS) {
+    return true;
+  }
+  if (m.expires_at) {
+    const exp = new Date(m.expires_at).getTime();
+    if (Number.isFinite(exp) && exp <= now) return true;
+  }
+  return false;
 }
 
 export function saveConversations(convs: Conversation[]) {
@@ -2368,7 +2400,7 @@ export function loadConversations(
   clientId?: string,
   pharmacyUserId?: string
 ): Conversation[] {
-  let all = [...memoryConversations].map((c) => {
+  const all = [...memoryConversations].map((c) => {
     const pid = c.pharmacy_id || c.pharmacie_id || '';
     return {
       ...c,
@@ -2387,13 +2419,17 @@ export function loadConversations(
     return all.filter(
       (c) =>
         c.pharmacy_user_id === pharmacyUserId ||
+        c.pharmacy_user_id === pharmacieId ||
         c.pharmacy_id === pharmacieId ||
         c.pharmacie_id === pharmacieId
     );
   }
   if (pharmacieId) {
     return all.filter(
-      (c) => c.pharmacy_id === pharmacieId || c.pharmacie_id === pharmacieId
+      (c) =>
+        c.pharmacy_id === pharmacieId ||
+        c.pharmacie_id === pharmacieId ||
+        c.pharmacy_user_id === pharmacieId
     );
   }
   if (clientId) {
@@ -2406,7 +2442,8 @@ export function loadConversations(
 
 export async function fetchConversations(
   pharmacieId?: string,
-  clientId?: string
+  clientId?: string,
+  pharmacyUserId?: string
 ): Promise<Conversation[]> {
   try {
     const sb = getSupabaseClient();
@@ -2451,18 +2488,20 @@ export async function fetchConversations(
         }
         memoryConversations = merged;
         notifyChange();
-        return loadConversations(pharmacieId, clientId);
+        return loadConversations(pharmacieId, clientId, pharmacyUserId);
       }
     }
   } catch (err) {
     console.warn('fetchConversations error:', err);
   }
-  return loadConversations(pharmacieId, clientId);
+  return loadConversations(pharmacieId, clientId, pharmacyUserId);
 }
 
 const inFlightConversationInserts = new Map<string, Promise<void>>();
+const persistedConversationIds = new Set<string>();
 
 async function ensureConversationInDB(conv: Conversation): Promise<void> {
+  if (persistedConversationIds.has(conv.id)) return;
   const existingPromise = inFlightConversationInserts.get(conv.id);
   if (existingPromise) {
     return existingPromise;
@@ -2472,6 +2511,20 @@ async function ensureConversationInDB(conv: Conversation): Promise<void> {
     try {
       const sb = getSupabaseClient();
       if (!sb) return;
+
+      // Vérifie d'abord si l'ID existe déjà en DB
+      const { data: existingRow } = await sb
+        .from('conversations')
+        .select('id')
+        .eq('id', conv.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingRow?.id) {
+        persistedConversationIds.add(conv.id);
+        return;
+      }
+
       const fullRow: Record<string, any> = {
         id: conv.id,
         client_id: conv.client_id,
@@ -2491,39 +2544,67 @@ async function ensureConversationInDB(conv: Conversation): Promise<void> {
         fullRow.admin_id = conv.admin_id;
       }
 
-      let { error } = await sb.from('conversations').insert([fullRow]);
+      let { error } = await sb
+        .from('conversations')
+        .upsert([fullRow], { onConflict: 'id' });
+
       if (
         error &&
         error.code !== '23505' &&
         !error.message?.includes('duplicate')
       ) {
         console.warn(
-          '[EFA GARDE] INSERT conversations complet échoué, tentative core:',
+          '[EFA GARDE] UPSERT conversations complet échoué, tentative core:',
           error.message
         );
-        const coreRes = await sb.from('conversations').insert([
-          {
-            id: conv.id,
-            client_id: conv.client_id,
-            pharmacy_id: conv.pharmacy_id,
-            pharmacy_user_id: conv.pharmacy_user_id || conv.pharmacy_id,
-            last_message: conv.last_message || '',
-            last_message_at: conv.last_message_at || conv.created_at,
-            created_at: conv.created_at,
-            updated_at: conv.updated_at,
-          },
-        ]);
+        const coreRes = await sb.from('conversations').upsert(
+          [
+            {
+              id: conv.id,
+              client_id: conv.client_id,
+              pharmacy_id: conv.pharmacy_id,
+              pharmacy_user_id: conv.pharmacy_user_id || conv.pharmacy_id,
+              last_message: conv.last_message || '',
+              last_message_at: conv.last_message_at || conv.created_at,
+              created_at: conv.created_at,
+              updated_at: conv.updated_at,
+            },
+          ],
+          { onConflict: 'id' }
+        );
         error = coreRes.error;
       }
+
       if (
         error &&
         error.code !== '23505' &&
         !error.message?.includes('duplicate')
       ) {
+        const minRes = await sb.from('conversations').insert([
+          {
+            id: conv.id,
+            client_id: conv.client_id,
+            pharmacy_id: conv.pharmacy_id,
+            last_message: conv.last_message || '',
+            created_at: conv.created_at,
+          },
+        ]);
+        error = minRes.error;
+      }
+
+      if (
+        !error ||
+        error.code === '23505' ||
+        error.message?.includes('duplicate')
+      ) {
+        persistedConversationIds.add(conv.id);
+      } else {
         console.error('[EFA GARDE] INSERT conversations:', error.message);
       }
     } catch (err) {
       console.warn('[EFA GARDE] ensureConversationInDB warning:', err);
+    } finally {
+      inFlightConversationInserts.delete(conv.id);
     }
   })();
 
@@ -2570,11 +2651,60 @@ export function getOrCreateConversation(
 
   memoryConversations.unshift(newConv);
 
-  // INSERT direct dans public.conversations (modèle exact user_consents)
+  // INSERT direct dans public.conversations
   void ensureConversationInDB(newConv);
 
   notifyChange();
   return newConv;
+}
+
+/**
+ * Résout ou crée de façon réciproque la conversation unique (client_id, pharmacy_id) dans Supabase :
+ * garantit que client et pharmacie utilisent exactement le même `conversation_id`.
+ */
+export async function resolveOrCreateConversation(
+  clientId: string,
+  pharmacieId: string,
+  pharmacyUserId?: string
+): Promise<Conversation> {
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { data, error } = await sb
+        .from('conversations')
+        .select('*')
+        .eq('client_id', clientId)
+        .or(`pharmacy_id.eq.${pharmacieId},pharmacie_id.eq.${pharmacieId}`)
+        .order('last_message_at', { ascending: false })
+        .limit(1);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const row: any = data[0];
+        const pid = row.pharmacy_id || row.pharmacie_id || pharmacieId;
+        const dbConv: Conversation = {
+          ...row,
+          pharmacy_id: pid,
+          pharmacie_id: row.pharmacie_id || pid,
+          pharmacy_user_id: row.pharmacy_user_id || pharmacyUserId || pid,
+        };
+        persistedConversationIds.add(dbConv.id);
+        const idx = memoryConversations.findIndex((c) => c.id === dbConv.id);
+        if (idx >= 0) {
+          memoryConversations[idx] = dbConv;
+        } else {
+          memoryConversations.unshift(dbConv);
+        }
+        notifyChange();
+        return dbConv;
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] resolveOrCreateConversation lookup warning:', err);
+  }
+
+  const conv = getOrCreateConversation(clientId, pharmacieId, pharmacyUserId);
+  await ensureConversationInDB(conv);
+  return conv;
 }
 
 export function getOrCreateSuperAdminConversation(
@@ -2627,11 +2757,23 @@ export async function fetchMessages(
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      const { data, error } = await sb
+      const cutoff24h = new Date(Date.now() - MS_24_HOURS).toISOString();
+      let { data, error } = await sb
         .from('messages')
         .select('*')
         .eq('conversation_id', conversationId)
+        .gte('created_at', cutoff24h)
         .order('created_at', { ascending: true });
+
+      if (error) {
+        const fallback = await sb
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: true });
+        data = fallback.data;
+        error = fallback.error;
+      }
 
       if (error) {
         console.error('[EFA GARDE] fetchMessages error:', error.message);
@@ -2725,14 +2867,14 @@ export function addMessage(
   memoryMessages[conversationId] = list;
 
   // 2. Mettre à jour last_message, last_message_at et incrémenter unread count
-  if (cIdx !== -1) {
-    const summary =
-      mediaOptions?.type === 'audio'
-        ? '🎤 Message vocal'
-        : mediaOptions?.type === 'image'
-        ? '📷 Photo'
-        : text;
+  const summary =
+    mediaOptions?.type === 'audio'
+      ? '🎤 Message vocal'
+      : mediaOptions?.type === 'image'
+      ? '📷 Photo'
+      : text;
 
+  if (cIdx !== -1) {
     memoryConversations[cIdx].last_message = summary;
     memoryConversations[cIdx].last_message_at = createdAt;
     memoryConversations[cIdx].updated_at = createdAt;
@@ -2771,33 +2913,40 @@ export function addMessage(
       const sb = getSupabaseClient();
       if (!sb) return;
 
-      if (conv) {
-        await ensureConversationInDB(conv);
-      } else {
-        const pendingInsert = inFlightConversationInserts.get(conversationId);
-        if (pendingInsert) {
-          await pendingInsert;
-        }
-      }
+      const convToEnsure: Conversation = conv || {
+        id: conversationId,
+        client_id: sender === 'client' ? senderId : receiverId,
+        pharmacy_id: sender === 'pharma' ? senderId : receiverId,
+        pharmacie_id: sender === 'pharma' ? senderId : receiverId,
+        pharmacy_user_id: sender === 'pharma' ? senderId : receiverId,
+        last_message: summary,
+        last_message_at: createdAt,
+        unread_count_pharmacy: sender === 'client' ? 1 : 0,
+        unread_count_client: sender === 'pharma' ? 1 : 0,
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
 
-      let { error: msgErr } = await sb.from('messages').insert([
-        {
-          id: newMsg.id,
-          conversation_id: newMsg.conversation_id,
-          sender_id: newMsg.sender_id,
-          receiver_id: newMsg.receiver_id,
-          sender_type: newMsg.sender_type,
-          sender: newMsg.sender,
-          content: newMsg.content,
-          text: newMsg.text,
-          type: newMsg.type,
-          media_url: newMsg.media_url || null,
-          audio_duration: newMsg.audio_duration || null,
-          is_read: false,
-          created_at: newMsg.created_at,
-          expires_at: newMsg.expires_at,
-        },
-      ]);
+      await ensureConversationInDB(convToEnsure);
+
+      const fullMsgRow = {
+        id: newMsg.id,
+        conversation_id: newMsg.conversation_id,
+        sender_id: newMsg.sender_id,
+        receiver_id: newMsg.receiver_id,
+        sender_type: newMsg.sender_type,
+        sender: newMsg.sender,
+        content: newMsg.content,
+        text: newMsg.text,
+        type: newMsg.type,
+        media_url: newMsg.media_url || null,
+        audio_duration: newMsg.audio_duration || null,
+        is_read: false,
+        created_at: newMsg.created_at,
+        expires_at: newMsg.expires_at,
+      };
+
+      let { error: msgErr } = await sb.from('messages').insert([fullMsgRow]);
 
       if (msgErr) {
         console.warn('[EFA GARDE] INSERT messages complet échoué, tentative core:', msgErr.message);
@@ -2817,23 +2966,46 @@ export function addMessage(
       }
 
       if (msgErr) {
+        const minimalRes = await sb.from('messages').insert([
+          {
+            id: newMsg.id,
+            conversation_id: newMsg.conversation_id,
+            sender_id: newMsg.sender_id,
+            receiver_id: newMsg.receiver_id,
+            content: newMsg.content,
+            created_at: newMsg.created_at,
+          },
+        ]);
+        msgErr = minimalRes.error;
+      }
+
+      if (msgErr) {
         console.error('[EFA GARDE] INSERT messages:', msgErr.message);
       }
 
-      if (conv) {
-        const { error: convUpdateErr } = await sb
+      const updateFields: Record<string, any> = {
+        last_message: conv?.last_message || summary,
+        last_message_at: conv?.last_message_at || createdAt,
+        unread_count_pharmacy: conv?.unread_count_pharmacy ?? (sender === 'client' ? 1 : 0),
+        unread_count_client: conv?.unread_count_client ?? (sender === 'pharma' ? 1 : 0),
+        updated_at: conv?.updated_at || createdAt,
+      };
+      let { error: convUpdateErr } = await sb
+        .from('conversations')
+        .update(updateFields)
+        .eq('id', conversationId);
+      if (convUpdateErr) {
+        const minUpd = await sb
           .from('conversations')
           .update({
-            last_message: conv.last_message,
-            last_message_at: conv.last_message_at,
-            unread_count_pharmacy: conv.unread_count_pharmacy,
-            unread_count_client: conv.unread_count_client,
-            updated_at: conv.updated_at,
+            last_message: conv?.last_message || summary,
+            updated_at: conv?.updated_at || createdAt,
           })
           .eq('id', conversationId);
-        if (convUpdateErr) {
-          console.warn('[EFA GARDE] UPDATE conversations:', convUpdateErr.message);
-        }
+        convUpdateErr = minUpd.error;
+      }
+      if (convUpdateErr) {
+        console.warn('[EFA GARDE] UPDATE conversations:', convUpdateErr.message);
       }
 
       await fetchMessages(conversationId);
@@ -3611,32 +3783,89 @@ export function initSupabaseRealtime(): void {
             const newMsg = payload.new;
             const convId = newMsg.conversation_id;
             if (convId) {
-              const list = memoryMessages[convId] || [];
-              if (!list.some((m) => m.id === newMsg.id)) {
-                list.push({
-                  id: newMsg.id,
-                  conversation_id: convId,
-                  sender:
-                    newMsg.sender ||
-                    (newMsg.sender_type === 'pharma'
-                      ? 'pharma'
-                      : newMsg.sender_type === 'admin'
-                      ? 'admin'
-                      : 'client'),
-                  sender_type: newMsg.sender_type || newMsg.sender || 'client',
-                  sender_id: newMsg.sender_id,
-                  receiver_id: newMsg.receiver_id,
-                  text: newMsg.text || newMsg.content || '',
-                  content: newMsg.content || newMsg.text || '',
-                  created_at: newMsg.created_at || new Date().toISOString(),
-                  expires_at: newMsg.expires_at,
-                  is_read: Boolean(newMsg.is_read),
-                  type: newMsg.type || 'text',
-                  media_url: newMsg.media_url,
-                  audio_duration: newMsg.audio_duration,
-                });
-                memoryMessages[convId] = list;
+              const resolvedSender: 'client' | 'pharma' | 'admin' =
+                newMsg.sender ||
+                (newMsg.sender_type === 'pharma'
+                  ? 'pharma'
+                  : newMsg.sender_type === 'admin'
+                  ? 'admin'
+                  : 'client');
+              const msgObj: Message = {
+                id: newMsg.id,
+                conversation_id: convId,
+                sender: resolvedSender,
+                sender_type: newMsg.sender_type || resolvedSender,
+                sender_id: newMsg.sender_id,
+                receiver_id: newMsg.receiver_id,
+                text: newMsg.text || newMsg.content || '',
+                content: newMsg.content || newMsg.text || '',
+                created_at: newMsg.created_at || new Date().toISOString(),
+                expires_at: newMsg.expires_at,
+                is_read: Boolean(newMsg.is_read),
+                type: newMsg.type || 'text',
+                media_url: newMsg.media_url,
+                audio_duration: newMsg.audio_duration,
+              };
+
+              if (!isMessageExpired(msgObj)) {
+                const list = memoryMessages[convId] || [];
+                if (!list.some((m) => m.id === msgObj.id)) {
+                  list.push(msgObj);
+                  memoryMessages[convId] = list;
+                }
               }
+
+              // Mettre à jour ou créer la conversation en mémoire immédiatement pour réciprocité instantanée
+              const convIdx = memoryConversations.findIndex((c) => c.id === convId);
+              const msgPreview =
+                msgObj.type === 'audio'
+                  ? '🎤 Message vocal'
+                  : msgObj.type === 'image'
+                  ? '📷 Photo'
+                  : msgObj.text || '';
+              if (convIdx >= 0) {
+                memoryConversations[convIdx] = {
+                  ...memoryConversations[convIdx],
+                  last_message: msgPreview,
+                  last_message_at: msgObj.created_at,
+                  updated_at: msgObj.created_at,
+                  unread_count_pharmacy:
+                    resolvedSender === 'client' || resolvedSender === 'admin'
+                      ? (memoryConversations[convIdx].unread_count_pharmacy || 0) + 1
+                      : memoryConversations[convIdx].unread_count_pharmacy,
+                  unread_count_client:
+                    resolvedSender === 'pharma'
+                      ? (memoryConversations[convIdx].unread_count_client || 0) + 1
+                      : memoryConversations[convIdx].unread_count_client,
+                };
+              } else {
+                const guessedClientId =
+                  resolvedSender === 'client' ? newMsg.sender_id : newMsg.receiver_id;
+                const guessedPharmaId =
+                  resolvedSender === 'pharma' ? newMsg.sender_id : newMsg.receiver_id;
+                if (guessedClientId && guessedPharmaId) {
+                  memoryConversations.unshift({
+                    id: convId,
+                    client_id: guessedClientId,
+                    pharmacy_id: guessedPharmaId,
+                    pharmacie_id: guessedPharmaId,
+                    pharmacy_user_id: guessedPharmaId,
+                    last_message: msgPreview,
+                    last_message_at: msgObj.created_at,
+                    unread_count_pharmacy: resolvedSender === 'client' ? 1 : 0,
+                    unread_count_client: resolvedSender === 'pharma' ? 1 : 0,
+                    created_at: msgObj.created_at,
+                    updated_at: msgObj.created_at,
+                  });
+                }
+                fetchConversations().catch(() => {});
+                fetchClients().catch(() => {});
+              }
+            }
+          } else if (payload.eventType === 'DELETE' && payload.old?.id) {
+            const oldId = payload.old.id;
+            for (const cId of Object.keys(memoryMessages)) {
+              memoryMessages[cId] = memoryMessages[cId].filter((m) => m.id !== oldId);
             }
           }
           notifyChange();

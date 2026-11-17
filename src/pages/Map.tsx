@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Pharmacie } from '../types';
 import { PharmacyMap } from '../components/PharmacyMap';
 import { PharmacyCard } from '../components/PharmacyCard';
-import { trackItineraryClick, recordClientContact, fetchApprovedPharmacies, fetchDemandesAbonnement } from '../services/store';
+import { trackItineraryClick, recordClientContact, fetchApprovedPharmacies, fetchDemandesAbonnement, getPharmacyListTier } from '../services/store';
 import {
   get3ClosestPharmacies,
   getDistance,
@@ -172,10 +172,10 @@ export const Map: React.FC<MapProps> = ({
       );
   }, []);
 
-  // 2 & 3. CALCUL DE DISTANCE & TRI PRIVILÈGE POPULAIRE (TÊTE DE LISTE) + DISTANCE
-  const displayedPharmacies = useMemo(() => {
+  // 2 & 3. CARTE (toutes actives filtrées recherche) VS LISTE HIÉRARCHIQUE :
+  // Jaunes (PLAN STAR: toujours visibles même si is_garde=false) > Verts (seulement si is_garde=true) > Gris (seulement si is_garde=true)
+  const { mapPharmacies, listedPharmacies } = useMemo(() => {
     const sourceList = pharmacies.length > 0 ? pharmacies : fetchedPharmacies;
-    // Déduplication stricte par ID pour éviter toute clé React en double
     const seenIds = new Set<string>();
     const cleanList = sourceList.filter((p) => {
       if (!p || !p.id || seenIds.has(p.id)) return false;
@@ -183,44 +183,45 @@ export const Map: React.FC<MapProps> = ({
       return true;
     });
 
-    return cleanList
+    const q = searchQuery.toLowerCase();
+    const withDistance = cleanList
       .filter((p) => {
         const nom = (p.nom || '').toLowerCase();
         const adresse = (p.adresse || '').toLowerCase();
-        const q = searchQuery.toLowerCase();
-        const matchSearch = nom.includes(q) || adresse.includes(q);
-        // Si is_always_visible=true, ne jamais les filtrer même si garde = false (onlyOnline)
-        const matchOnline = onlyOnline
-          ? Boolean(p.is_online || p.is_always_visible)
-          : true;
-        return matchSearch && matchOnline;
+        const quartier = (p.quartier || '').toLowerCase();
+        return nom.includes(q) || adresse.includes(q) || quartier.includes(q);
       })
       .map((p) => {
         const dist = userLocation
           ? getDistance(userLocation.lat, userLocation.lng, p.lat, p.lng)
           : undefined;
         return { ...p, distanceKm: dist };
+      });
+
+    // Pour la carte Leaflet : conserver l'affichage existant sans modifier les couleurs de marqueurs
+    const forMap = withDistance.filter((p) => {
+      if (!onlyOnline) return true;
+      return Boolean(p.is_garde ?? p.is_online) || getPharmacyListTier(p) === 0;
+    });
+
+    // Pour la liste :
+    // - PLAN STAR (tier 0) : TOUJOURS VISIBLE même si is_garde=false, toujours en tête
+    // - VERT (tier 1) : visible SEULEMENT si is_garde=true, au milieu
+    // - GRIS (tier 2) : visible SEULEMENT si is_garde=true, en bas
+    const forList = withDistance
+      .filter((p) => {
+        const tier = getPharmacyListTier(p);
+        if (tier === 0) return true;
+        return Boolean(p.is_garde ?? p.is_online);
       })
       .sort((a, b) => {
-        // 1. Privilèges officiels POPULAIRE GOLD :
-        // order('is_premium', {ascending:false}).order('position', {ascending:true}).order('etoile_doree', {ascending:false})
-        const isPopA = Boolean(
-          a.is_premium ||
-            a.etoile_doree ||
-            a.plan === 'populaire_mensuel' ||
-            a.plan === 'populaire_annuel'
-        );
-        const isPopB = Boolean(
-          b.is_premium ||
-            b.etoile_doree ||
-            b.plan === 'populaire_mensuel' ||
-            b.plan === 'populaire_annuel'
-        );
+        const tierA = getPharmacyListTier(a);
+        const tierB = getPharmacyListTier(b);
 
-        if (isPopA && !isPopB) return -1;
-        if (!isPopA && isPopB) return 1;
+        // Hiérarchie stricte : Jaunes (0) > Verts (1) > Gris (2)
+        if (tierA !== tierB) return tierA - tierB;
 
-        if (isPopA && isPopB) {
+        if (tierA === 0) {
           const posA = a.position !== undefined ? a.position : 999;
           const posB = b.position !== undefined ? b.position : 999;
           if (posA !== posB) return posA - posB;
@@ -228,20 +229,14 @@ export const Map: React.FC<MapProps> = ({
           if (!a.etoile_doree && b.etoile_doree) return 1;
         }
 
-        // 2. Quand localisation active : trier par distance croissante absolue
         if (userLocation && a.distanceKm !== undefined && b.distanceKm !== undefined) {
           return a.distanceKm - b.distanceKm;
         }
 
-        // 3. Sinon tri standard : plan top en premier, puis en ligne, puis nom
-        if (a.plan === 'top' && b.plan !== 'top') return -1;
-        if (b.plan === 'top' && a.plan !== 'top') return 1;
-
-        if (a.is_online && !b.is_online) return -1;
-        if (!a.is_online && b.is_online) return 1;
-
         return (a.nom || '').localeCompare(b.nom || '');
       });
+
+    return { mapPharmacies: forMap, listedPharmacies: forList };
   }, [pharmacies, fetchedPharmacies, searchQuery, onlyOnline, userLocation]);
 
   return (
@@ -336,7 +331,7 @@ export const Map: React.FC<MapProps> = ({
           </button>
 
           <span className="text-slate-400 text-xs">
-            {displayedPharmacies.length} pharmacie{displayedPharmacies.length > 1 ? 's' : ''}
+            {mapPharmacies.length} pharmacie{mapPharmacies.length > 1 ? 's' : ''}
           </span>
         </div>
       </div>
@@ -346,7 +341,7 @@ export const Map: React.FC<MapProps> = ({
         {/* Map Container: h-[60vh] mobile, h-[85vh] desktop */}
         <div className="lg:col-span-7 xl:col-span-8 relative h-[60vh] md:h-[85vh] w-full rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-900">
           <PharmacyMap
-            pharmacies={displayedPharmacies}
+            pharmacies={mapPharmacies}
             selectedPharmacy={selectedPharmacy}
             onSelectPharmacy={(pharma) => setSelectedPharmacy(pharma)}
             userPosition={userLocation}
@@ -376,8 +371,8 @@ export const Map: React.FC<MapProps> = ({
             <h2 className="text-base font-black text-white flex items-center gap-1.5">
               <span>
                 {userLocation
-                  ? `📍 ${displayedPharmacies.length} pharmacies autour de vous`
-                  : `📍 ${displayedPharmacies.length} officines de Lomé`}
+                  ? `📍 ${listedPharmacies.length} pharmacies autour de vous`
+                  : `📍 ${listedPharmacies.length} officines de Lomé`}
               </span>
             </h2>
 
@@ -398,44 +393,60 @@ export const Map: React.FC<MapProps> = ({
           </div>
 
           <div className="space-y-3 max-h-[60vh] lg:max-h-[80vh] overflow-y-auto pr-1">
-            {displayedPharmacies.map((p, index) => {
+            {listedPharmacies.map((p, index) => {
               const isSelected = selectedPharmacy?.id === p.id;
-              const isTop = p.plan === 'top';
+              const tier = getPharmacyListTier(p);
+              const isPlanStar = tier === 0;
+              const isVertPaid = tier === 1;
               const isClosest = userLocation && index === 0;
 
               // Format textuel : "Pharmacie Dékon - À 800m de vous"
               const distanceText =
                 p.distanceKm !== undefined ? ` - ${formatDistanceUser(p.distanceKm)}` : '';
 
+              const cardStyleClass = isPlanStar
+                ? isSelected
+                  ? 'bg-gradient-to-r from-yellow-500/30 via-amber-500/20 to-slate-900 border-2 border-yellow-300 ring-2 ring-yellow-400/50 shadow-yellow-500/20'
+                  : 'bg-gradient-to-r from-yellow-500/20 via-amber-500/15 to-slate-900 border-2 border-yellow-400/80 hover:border-yellow-300 shadow-yellow-500/10'
+                : isVertPaid
+                ? isSelected
+                  ? 'bg-gradient-to-r from-emerald-950/70 via-emerald-900/30 to-slate-900 border-2 border-emerald-400 ring-2 ring-emerald-500/40'
+                  : 'bg-gradient-to-r from-emerald-950/50 via-emerald-900/20 to-slate-900 border border-emerald-500/60 hover:border-emerald-400'
+                : isSelected
+                ? 'bg-slate-800 border-2 border-slate-400 ring-2 ring-slate-500/40'
+                : 'bg-slate-900/90 border border-slate-700/80 hover:border-slate-600';
+
               return (
                 <div
                   key={p.id}
                   onClick={() => setSelectedPharmacy(p)}
-                  className={`w-full p-4 rounded-2xl border transition-all cursor-pointer space-y-3 shadow-lg relative ${
-                    isClosest
-                      ? 'bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-900 border-emerald-500/80 ring-2 ring-emerald-500/30'
-                      : isSelected
-                      ? 'bg-slate-800 border-blue-500 ring-2 ring-blue-500/40'
-                      : isTop
-                      ? 'bg-gradient-to-r from-amber-950/25 to-slate-900 border-amber-500/40 hover:border-amber-400'
-                      : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
-                  }`}
+                  className={`w-full p-4 rounded-2xl transition-all cursor-pointer space-y-3 shadow-lg relative ${cardStyleClass}`}
                 >
-                  {/* Badge vert "LA PLUS PROCHE ⭐" sur la première quand géolocalisé */}
-                  {isClosest && (
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500 text-slate-950 shadow-md">
-                      <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
-                      <span>LA PLUS PROCHE ⭐</span>
+                  {/* Badges hiérarchiques */}
+                  {(isPlanStar || isClosest) && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isPlanStar && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-400 text-slate-950 shadow-md">
+                          <Star className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
+                          <span>PLAN STAR</span>
+                        </span>
+                      )}
+                      {isClosest && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500 text-slate-950 shadow-md">
+                          <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                          <span>LA PLUS PROCHE ⭐</span>
+                        </span>
+                      )}
                     </div>
                   )}
 
                   <div className="flex items-start justify-between gap-2">
                     <div className="font-extrabold text-white text-base leading-snug">
                       <div className="flex items-center gap-1.5">
-                        {isTop && (
-                          <Star className="w-4 h-4 fill-amber-400 text-amber-400 shrink-0" />
+                        {isPlanStar && (
+                          <Star className="w-4 h-4 fill-yellow-400 text-yellow-400 shrink-0" />
                         )}
-                        <span>{p.nom}</span>
+                        <span className={isPlanStar ? 'text-yellow-100' : ''}>{p.nom}</span>
                       </div>
                       {/* Affichage distance sous le nom */}
                       {distanceText && (

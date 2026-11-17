@@ -431,22 +431,22 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
     showToast(`Demande de souscription refusée.`);
   };
 
-  // 1. Action: BOUTON POPULAIRE MENSUEL (15.000F) : couleur GOLD bg-yellow-500
+  // 1. Action: BOUTON PLAN STAR MENSUEL (15.000F) : couleur jaune bg-yellow-500
   // Au clic : subscription_plan='premium', subscription_status='active', subscription_start_at=NOW(), subscription_end_at=NOW() + 30 days
   const handleActivatePopulaireMensuel = async (p: Pharmacie) => {
     await activateSubscriptionInDB(p.id, { planType: 'premium_15k' });
     await fetchPharmacies();
     setPharmacies(loadPharmacies());
-    showToast(`⭐ "${p.nom}" activée en POPULAIRE MENSUEL (15.000F) pour 30 jours en DB !`);
+    showToast(`⭐ "${p.nom}" activée en PLAN STAR MENSUEL (15.000F) pour 30 jours en DB !`);
   };
 
-  // 2. Action: BOUTON POPULAIRE ANNUEL (140.000F) : couleur GOLD dégradé bg-gradient-to-r from-yellow-400 to-yellow-600
+  // 2. Action: BOUTON PLAN STAR ANNUEL (140.000F) : couleur jaune dégradé bg-gradient-to-r from-yellow-400 to-yellow-600
   // Au clic : subscription_plan='premium', subscription_status='active', subscription_start_at=NOW(), subscription_end_at=NOW() + 365 days
   const handleActivatePopulaireAnnuel = async (p: Pharmacie) => {
     await activateSubscriptionInDB(p.id, { planType: 'premium_140k' });
     await fetchPharmacies();
     setPharmacies(loadPharmacies());
-    showToast(`👑 "${p.nom}" activée en POPULAIRE ANNUEL (140.000F) pour 1 an en DB !`);
+    showToast(`👑 "${p.nom}" activée en PLAN STAR ANNUEL (140.000F) pour 1 an en DB !`);
   };
 
   // 3. Action: Activer 1 an (90.000F) => subscription_plan='basic', subscription_status='active', subscription_end_at = now + 365j
@@ -1429,24 +1429,24 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                               <span>⚡ Choix plan (Modal)</span>
                             </button>
 
-                            {/* BOUTON POPULAIRE MENSUEL (15.000F) : couleur GOLD bg-yellow-500 */}
+                            {/* BOUTON PLAN STAR MENSUEL (15.000F) : couleur jaune bg-yellow-500 */}
                             <button
                               type="button"
                               onClick={() => handleActivatePopulaireMensuel(p)}
                               className="px-2.5 py-1.5 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-black text-[11px] shadow-sm transition-all cursor-pointer active:scale-95"
-                              title="Activer POPULAIRE MENSUEL (15.000F / mois, privilèges Gold, position 0)"
+                              title="Activer PLAN STAR MENSUEL (15.000F / mois, position 0)"
                             >
-                              ⭐ Populaire Mensuel (15.000F)
+                              ⭐ Plan Star Mensuel (15.000F)
                             </button>
 
-                            {/* BOUTON POPULAIRE ANNUEL (140.000F) : couleur GOLD dégradé bg-gradient-to-r from-yellow-400 to-yellow-600 */}
+                            {/* BOUTON PLAN STAR ANNUEL (140.000F) : couleur jaune dégradé bg-gradient-to-r from-yellow-400 to-yellow-600 */}
                             <button
                               type="button"
                               onClick={() => handleActivatePopulaireAnnuel(p)}
                               className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-yellow-400 to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-slate-950 font-black text-[11px] shadow-md transition-all cursor-pointer active:scale-95"
-                              title="Activer POPULAIRE ANNUEL (140.000F / an, privilèges Gold, position 0)"
+                              title="Activer PLAN STAR ANNUEL (140.000F / an, position 0)"
                             >
-                              👑 Populaire Annuel (140.000F)
+                              👑 Plan Star Annuel (140.000F)
                             </button>
 
                             {/* Activer 1 an 90k */}

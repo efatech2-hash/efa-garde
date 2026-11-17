@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Pharmacie, Message, Conversation } from '../types';
 import {
   getOrCreateConversation,
+  resolveOrCreateConversation,
   loadMessages,
   addMessage,
   subscribeToStore,
@@ -14,6 +15,7 @@ import {
   markConversationAsRead,
   loadConversations,
   fetchMessages,
+  fetchClients,
   getOrCreateClientId,
 } from '../services/store';
 import { playNotificationSound } from '../services/sound';
@@ -218,57 +220,81 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const prevMessagesCountRef = useRef(0);
 
-  // Auto clean 48H execution on mount
+  const pharmaciesRef = useRef(pharmacies);
+  pharmaciesRef.current = pharmacies;
+
+  // Auto clean 24H execution on mount
   useEffect(() => {
     cleanExpiredMessages();
+    fetchClients().catch(() => {});
   }, []);
 
-  // Initialize conversation
+  // Initialize & resolve unique shared conversation in Supabase
   useEffect(() => {
-    if (!pharmacy) return;
+    if (!pharmacy?.id) return;
+    let cancelled = false;
     const pharmacyUserId = (pharmacy as any).owner_user_id || (pharmacy as any).user_id || pharmacy.id;
-    const conv = getOrCreateConversation(clientId, pharmacy.id, pharmacyUserId);
-    setConversation(conv);
-    markConversationAsRead(conv.id, 'client', clientId);
-    const msgs = loadMessages(conv.id);
-    setMessages(msgs);
-    prevMessagesCountRef.current = msgs.length;
-    setPharmaOnline(pharmacy.is_online);
 
-    // Synchronisation directe depuis Supabase
-    fetchMessages(conv.id).then((serverMsgs) => {
-      if (serverMsgs && serverMsgs.length > 0) {
+    // Création synchrone immédiate pour rendu instantané
+    const localConv = getOrCreateConversation(clientId, pharmacy.id, pharmacyUserId);
+    setConversation(localConv);
+    markConversationAsRead(localConv.id, 'client', clientId);
+    const localMsgs = loadMessages(localConv.id);
+    setMessages(localMsgs);
+    prevMessagesCountRef.current = localMsgs.length;
+    setPharmaOnline(Boolean(pharmacy.is_garde ?? pharmacy.is_online));
+
+    // Résolution réciproque depuis Supabase (même conversation_id si déjà existante)
+    resolveOrCreateConversation(clientId, pharmacy.id, pharmacyUserId)
+      .then((resolvedConv) => {
+        if (cancelled) return;
+        setConversation(resolvedConv);
+        return fetchMessages(resolvedConv.id);
+      })
+      .then((serverMsgs) => {
+        if (cancelled || !serverMsgs) return;
         setMessages(serverMsgs);
         prevMessagesCountRef.current = serverMsgs.length;
-      }
-    }).catch(() => {});
-  }, [pharmacy, clientId]);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pharmacy?.id, clientId]);
 
   // Subscribe to changes (messages & status)
   useEffect(() => {
-    if (!conversation) return;
+    const convId = conversation?.id;
+    if (!convId) return;
 
     const unsubscribeStore = subscribeToStore(() => {
-      const updated = loadMessages(conversation.id);
+      const updated = loadMessages(convId);
       if (updated.length > prevMessagesCountRef.current) {
         const last = updated[updated.length - 1];
-        if (last.sender === 'pharma') {
+        if (last && last.sender === 'pharma') {
           playNotificationSound();
-          markConversationAsRead(conversation.id, 'client', clientId);
+          markConversationAsRead(convId, 'client', clientId);
         }
       }
       prevMessagesCountRef.current = updated.length;
       setMessages(updated);
 
-      // Rafraîchir l'état de la conversation (is_blocked, etc.)
-      const allConvs = loadConversations();
-      const curr = allConvs.find((c) => c.id === conversation.id);
+      // Rafraîchir l'état de blocage uniquement si modifié
+      const curr = loadConversations().find((c) => c.id === convId);
       if (curr) {
-        setConversation(curr);
+        setConversation((prev) =>
+          prev &&
+          prev.id === curr.id &&
+          prev.is_blocked === curr.is_blocked &&
+          prev.blocked_by_type === curr.blocked_by_type
+            ? prev
+            : curr
+        );
       }
 
-      const current = pharmacies.find((p) => p.id === pharmacieId);
-      if (current) setPharmaOnline(current.is_online);
+      const currentPharma = pharmaciesRef.current.find((p) => p.id === pharmacieId);
+      if (currentPharma) setPharmaOnline(Boolean(currentPharma.is_garde ?? currentPharma.is_online));
     });
 
     const unsubscribePresence = trackPresence(
@@ -287,7 +313,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     );
 
     const poll = setInterval(() => {
-      fetchMessages(conversation.id)
+      fetchMessages(convId)
         .then((serverMsgs) => {
           if (serverMsgs) {
             setMessages(serverMsgs);
@@ -295,14 +321,14 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
           }
         })
         .catch(() => {});
-    }, 5000);
+    }, 4000);
 
     return () => {
       clearInterval(poll);
       unsubscribeStore();
       unsubscribePresence();
     };
-  }, [conversation, clientId, pharmacy?.id, pharmacies, pharmacieId]);
+  }, [conversation?.id, clientId, pharmacy?.id, pharmacieId]);
 
   // Actions de blocage et déblocage
   const handleOpenBlockModal = (mode: 'block' | 'report') => {
@@ -689,7 +715,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     );
   }
 
-  // Filter 48h for frontend safety
+  // Filter 24h for frontend safety
   const visibleMessages = messages.filter((m) => !isMessageExpired(m));
 
   return (
@@ -728,25 +754,19 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
             />
           </div>
 
-          {/* Titre responsive : "Messagerie de garde pharmacie [Nom Pharmacie]" */}
+          {/* Nom Pharmacie affiché en tête du Chat côté client */}
           <div className="flex flex-col min-w-0 max-w-[60vw] sm:max-w-none flex-1 justify-center overflow-hidden pr-1">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1.5 min-w-0 flex-wrap text-sm md:text-base">
-              <span className="font-bold text-white truncate max-w-[60vw] sm:max-w-none leading-tight">
-                Messagerie de garde pharmacie
-              </span>
-              <span className="hidden sm:inline text-white/60">•</span>
-              <span className="font-extrabold text-white truncate max-w-[60vw] sm:max-w-none leading-tight">
-                {pharmacy.nom}
-              </span>
-            </div>
+            <h3 className="text-sm md:text-base font-extrabold text-white truncate max-w-[60vw] sm:max-w-none leading-tight">
+              {pharmacy.nom}
+            </h3>
             <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[11px] text-white/90">
               {pharmaOnline ? (
                 <span className="text-emerald-300 font-semibold flex items-center gap-1 shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  en ligne
+                  de garde • en ligne
                 </span>
               ) : (
-                <span className="text-white/70 shrink-0">pharmacien de garde</span>
+                <span className="text-white/75 shrink-0">Messagerie de garde</span>
               )}
               <span className="text-white/40">•</span>
               <span className="truncate max-w-[80px] sm:max-w-[160px] text-white/80">
@@ -883,7 +903,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
           backgroundSize: '20px 20px',
         }}
       >
-        {/* 48H Auto-Clean Security Notice Banner */}
+        {/* 24H Auto-Clean Security Notice Banner */}
         <div className="max-w-md mx-auto bg-amber-50/90 border border-amber-200/80 rounded-xl p-2.5 text-center shadow-xs">
           <div className="flex items-center justify-center gap-1.5 text-amber-800 text-[11px] font-bold">
             <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />

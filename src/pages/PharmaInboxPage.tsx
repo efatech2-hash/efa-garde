@@ -204,59 +204,102 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
 
   const prevMsgCountRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const selectedConvIdRef = useRef<string | null>(null);
+  const soundEnabledRef = useRef<boolean>(soundEnabled);
 
-  // Auto clean on mount
+  useEffect(() => {
+    selectedConvIdRef.current = selectedConv?.id || null;
+  }, [selectedConv?.id]);
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+
+  // Auto clean 24h on mount
   useEffect(() => {
     cleanExpiredMessages();
   }, []);
 
-  // Reload conversations
-  const refreshConvs = () => {
+  // Synchronisation pure depuis le cache mémoire (SANS appel Supabase pour éviter toute boucle notifyChange)
+  const syncLocalConvs = () => {
     if (!currentPharma) return;
-    const pharmaUserId = (currentPharma as any).owner_user_id || (currentPharma as any).user_id || currentPharma.id;
+    const pharmaUserId =
+      (currentPharma as any).owner_user_id ||
+      (currentPharma as any).user_id ||
+      currentPharma.id;
     const list = loadConversations(currentPharma.id, undefined, pharmaUserId);
     setConversations(list);
-    if (!selectedConv && list.length > 0) {
-      setSelectedConv(list[0]);
-    } else if (selectedConv) {
-      const updatedSelected = list.find((c) => c.id === selectedConv.id);
-      if (updatedSelected) setSelectedConv(updatedSelected);
-    }
 
-    // Synchronisation Supabase en tâche de fond
-    fetchConversations(currentPharma.id).then((serverConvs) => {
-      if (serverConvs) {
-        setConversations(serverConvs);
-        if (!selectedConv && serverConvs.length > 0) {
-          setSelectedConv(serverConvs[0]);
-        }
+    const activeId = selectedConvIdRef.current;
+    if (!activeId && list.length > 0) {
+      setSelectedConv(list[0]);
+      selectedConvIdRef.current = list[0].id;
+    } else if (activeId) {
+      const updatedSelected = list.find((c) => c.id === activeId);
+      if (updatedSelected) {
+        setSelectedConv(updatedSelected);
       }
-    }).catch(() => {});
+    }
+  };
+
+  // Synchronisation depuis Supabase (uniquement au montage, changement de pharmacie, ou polling)
+  const refreshFromServer = () => {
+    if (!currentPharma) return;
+    const pharmaUserId =
+      (currentPharma as any).owner_user_id ||
+      (currentPharma as any).user_id ||
+      currentPharma.id;
+    fetchConversations(currentPharma.id, undefined, pharmaUserId)
+      .then((serverConvs) => {
+        if (serverConvs) {
+          setConversations(serverConvs);
+          if (!selectedConvIdRef.current && serverConvs.length > 0) {
+            setSelectedConv(serverConvs[0]);
+            selectedConvIdRef.current = serverConvs[0].id;
+          }
+          // Si un client_id n'est pas encore résolu en clients.nom, charger la table clients
+          const hasUnresolvedClient = serverConvs.some(
+            (c) =>
+              c.client_id &&
+              c.client_id !== 'super-admin' &&
+              !c.admin_id &&
+              getClientDisplayName(c.client_id) === c.client_id
+          );
+          if (hasUnresolvedClient) {
+            fetchClients().catch(() => {});
+          }
+        }
+      })
+      .catch(() => {});
   };
 
   useEffect(() => {
-    refreshConvs();
+    syncLocalConvs();
+    refreshFromServer();
     fetchClients().catch(() => {});
   }, [currentPharma?.id]);
 
   // Load messages for selected conversation & mark as read
   useEffect(() => {
-    if (!selectedConv) {
+    if (!selectedConv?.id) {
       setMessages([]);
       return;
     }
-    markConversationAsRead(selectedConv.id, 'pharma', currentPharma?.id);
-    const msgs = loadMessages(selectedConv.id);
+    const convId = selectedConv.id;
+    markConversationAsRead(convId, 'pharma', currentPharma?.id);
+    const msgs = loadMessages(convId);
     setMessages(msgs);
     prevMsgCountRef.current = msgs.length;
 
-    // Synchronisation messages Supabase en temps réel
-    fetchMessages(selectedConv.id).then((serverMsgs) => {
-      if (serverMsgs) {
-        setMessages(serverMsgs);
-        prevMsgCountRef.current = serverMsgs.length;
-      }
-    }).catch(() => {});
+    // Synchronisation messages Supabase en temps réel (24h)
+    fetchMessages(convId)
+      .then((serverMsgs) => {
+        if (serverMsgs) {
+          setMessages(serverMsgs);
+          prevMsgCountRef.current = serverMsgs.length;
+        }
+      })
+      .catch(() => {});
   }, [selectedConv?.id, currentPharma?.id]);
 
   // Subscribe to realtime store, sound notifications & 5s fallback sync
@@ -274,16 +317,17 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     );
 
     const unsubscribeStore = subscribeToStore(() => {
-      refreshConvs();
-      if (selectedConv) {
-        const msgs = loadMessages(selectedConv.id);
+      syncLocalConvs();
+      const activeConvId = selectedConvIdRef.current;
+      if (activeConvId) {
+        const msgs = loadMessages(activeConvId);
         if (msgs.length > prevMsgCountRef.current) {
           const lastMsg = msgs[msgs.length - 1];
-          if (lastMsg.sender === 'client' || lastMsg.sender === 'admin') {
-            if (soundEnabled) {
+          if (lastMsg && (lastMsg.sender === 'client' || lastMsg.sender === 'admin')) {
+            if (soundEnabledRef.current) {
               playNotificationSound();
             }
-            markConversationAsRead(selectedConv.id, 'pharma', currentPharma.id);
+            markConversationAsRead(activeConvId, 'pharma', currentPharma.id);
           }
         }
         prevMsgCountRef.current = msgs.length;
@@ -292,10 +336,11 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     });
 
     const pollInterval = setInterval(() => {
-      fetchConversations(currentPharma.id).catch(() => {});
+      refreshFromServer();
       fetchClients().catch(() => {});
-      if (selectedConv) {
-        fetchMessages(selectedConv.id)
+      const activeConvId = selectedConvIdRef.current;
+      if (activeConvId) {
+        fetchMessages(activeConvId)
           .then((serverMsgs) => {
             if (serverMsgs) {
               setMessages(serverMsgs);
@@ -304,14 +349,14 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
           })
           .catch(() => {});
       }
-    }, 5000);
+    }, 4000);
 
     return () => {
       clearInterval(pollInterval);
       unsubscribePresence();
       unsubscribeStore();
     };
-  }, [currentPharma?.id, selectedConv, soundEnabled]);
+  }, [currentPharma?.id, selectedConv?.id]);
 
   // Auto-scroll
   useEffect(() => {
@@ -339,15 +384,15 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
       { reason: blockReason, description: blockDescription.trim() }
     );
     setShowBlockModal(false);
-    showToast(isReport ? 'Patient signalé et bloqué avec succès' : 'Patient bloqué');
-    refreshConvs();
+    showToast(isReport ? 'Client signalé et bloqué avec succès' : 'Client bloqué');
+    syncLocalConvs();
   };
 
   const handleUnblock = () => {
     if (!selectedConv) return;
     unblockConversation(selectedConv.id);
     showToast('Conversation débloquée');
-    refreshConvs();
+    syncLocalConvs();
   };
 
   const handleSendReply = (quickMsg?: string) => {
@@ -381,8 +426,9 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   const handleOpenSuperAdminChat = () => {
     if (!currentPharma) return;
     const conv = getOrCreateSuperAdminConversation(currentPharma.id);
-    refreshConvs();
+    syncLocalConvs();
     setSelectedConv(conv);
+    selectedConvIdRef.current = conv.id;
     fetchMessages(conv.id).then((serverMsgs) => {
       if (serverMsgs) setMessages(serverMsgs);
     }).catch(() => {});
@@ -567,7 +613,25 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0 flex-wrap">
+          {pharmacies.length > 1 && (
+            <select
+              value={currentPharma.id}
+              onChange={(e) => {
+                setSelectedConv(null);
+                selectedConvIdRef.current = null;
+                onSelectActivePharma(e.target.value);
+              }}
+              className="px-2.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-emerald-300 focus:outline-none focus:border-emerald-400 max-w-[180px]"
+              title="Sélectionner la pharmacie"
+            >
+              {pharmacies.map((ph) => (
+                <option key={ph.id} value={ph.id}>
+                  {ph.nom}
+                </option>
+              ))}
+            </select>
+          )}
           {/* Sound Toggle */}
           <button
             onClick={() => {
@@ -689,14 +753,14 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0A3D8F] animate-pulse" />
                   </div>
                   <div className="flex flex-col min-w-0 max-w-[60vw] sm:max-w-none justify-center overflow-hidden">
-                    <h3 className="text-sm font-bold text-white truncate max-w-[60vw] sm:max-w-none">
+                    <h3 className="text-sm sm:text-base font-extrabold text-white truncate max-w-[60vw] sm:max-w-none">
                       {selectedConv.client_id === 'super-admin' || selectedConv.admin_id
                         ? '👑 Super Admin EFA Garde'
                         : getClientDisplayName(selectedConv.client_id)}
                     </h3>
                     <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1 min-w-0 flex-wrap text-xs">
                       <span className="text-[11px] text-blue-100 font-medium truncate max-w-[60vw] sm:max-w-none">
-                        Messagerie de garde pharmacie
+                        Client en direct
                       </span>
                       <span className="hidden sm:inline text-blue-200/60">•</span>
                       <span className="text-[11px] font-bold text-white truncate max-w-[60vw] sm:max-w-none">

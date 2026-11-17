@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pharmacie } from '../types';
 import { getGoogleMapsNavigationUrl, formatDistanceUser } from '../utils/geo';
-import { trackItineraryClick, recordClientContact } from '../services/store';
+import { trackItineraryClick, recordClientContact, getPharmacyListTier } from '../services/store';
 import { Phone, Navigation, MessageSquare, Star, CheckCircle2, XCircle, MapPin } from 'lucide-react';
 
 interface PharmacyCardProps {
@@ -22,14 +22,11 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
   const isOnline = Boolean(pharmacy.is_garde ?? pharmacy.is_online);
   const isActive = pharmacy.is_active !== false;
   const canChat = Boolean(isOnline && isActive);
-  const isPopulaire = Boolean(
-    pharmacy.is_premium ||
-      pharmacy.etoile_doree ||
-      pharmacy.plan === 'populaire_mensuel' ||
-      pharmacy.plan === 'populaire_annuel'
-  );
-  const isTop = pharmacy.plan === 'top' && !isPopulaire;
-  const isPaid = isPopulaire || pharmacy.plan === 'top' || pharmacy.plan === '60k';
+  const tier = getPharmacyListTier(pharmacy);
+  const isPopulaire = tier === 0;
+  const isVertPaid = tier === 1;
+  const isTop = false;
+  const isPaid = isPopulaire || isVertPaid;
   const itineraireUrl = getGoogleMapsNavigationUrl(
     pharmacy.lat,
     pharmacy.lng,
@@ -41,7 +38,9 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
     <div
       className={`relative bg-slate-900/95 backdrop-blur-xl rounded-2xl p-5 shadow-2xl text-slate-100 max-w-md w-full animate-in fade-in slide-in-from-bottom-4 duration-200 ${
         isPopulaire
-          ? 'border-2 border-amber-400 shadow-amber-500/20'
+          ? 'border-2 border-yellow-400 bg-gradient-to-br from-yellow-500/15 via-slate-900 to-slate-900 shadow-yellow-500/20'
+          : isVertPaid
+          ? 'border-2 border-emerald-500/70 bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900'
           : 'border border-slate-700/80'
       }`}
     >
@@ -59,9 +58,9 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
       {/* Header Badges */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {isPopulaire && (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-950 shadow-md">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-400 text-slate-950 shadow-md">
             <Star className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
-            ⭐ POPULAIRE • EN TÊTE DE LISTE
+            PLAN STAR
           </span>
         )}
 
@@ -72,9 +71,9 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
           </span>
         )}
 
-        {pharmacy.plan === '60k' && !isPopulaire && (
+        {isVertPaid && !isPopulaire && (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-            Plan Annuel 60k
+            Officine vérifiée
           </span>
         )}
 

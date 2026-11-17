@@ -129,11 +129,11 @@ export const SubscriptionCountdown: React.FC<SubscriptionCountdownProps> = ({
 
   const planBadgeText =
     currentPharma.plan === 'populaire_annuel'
-      ? 'POPULAIRE - ANNUEL 140.000F'
+      ? 'PLAN STAR - ANNUEL 140.000F'
       : currentPharma.plan === 'populaire_mensuel'
-      ? 'POPULAIRE - 15.000F/mois'
+      ? 'PLAN STAR - 15.000F/mois'
       : currentPharma.subscription_plan === 'premium'
-      ? 'POPULAIRE GOLD'
+      ? 'PLAN STAR'
       : currentPharma.plan === 'annual' || currentPharma.plan === '60k' || currentPharma.subscription_plan === 'basic'
       ? 'STANDARD - 90.000F/an'
       : currentPharma.is_registered
@@ -216,7 +216,7 @@ export const SubscriptionCountdown: React.FC<SubscriptionCountdownProps> = ({
               : 'bg-slate-800 text-slate-300 border-slate-700'
           }`}
         >
-          {isPop ? '⭐ OFFRE GOLD' : 'STANDARD'}
+          {isPop ? '⭐ PLAN STAR' : 'STANDARD'}
         </span>
       </div>
 

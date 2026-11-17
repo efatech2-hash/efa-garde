@@ -250,7 +250,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
                           {isPop ? (
                             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-yellow-500 text-slate-950 flex items-center gap-1 shadow-xs">
                               <Star className="w-3 h-3 fill-slate-950" />
-                              POPULAIRE GOLD
+                              PLAN STAR
                             </span>
                           ) : (
                             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">

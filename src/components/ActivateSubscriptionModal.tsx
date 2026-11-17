@@ -118,7 +118,7 @@ export const ActivateSubscriptionModal: React.FC<ActivateSubscriptionModalProps>
                       POPULAIRE ANNUEL (140.000 FCFA / an)
                     </span>
                     <span className="text-[10px] text-yellow-300 font-bold uppercase">
-                      Offre Gold • 1 an (+365 jours)
+                      Plan Star • 1 an (+365 jours)
                     </span>
                   </div>
                 </div>
@@ -160,7 +160,7 @@ export const ActivateSubscriptionModal: React.FC<ActivateSubscriptionModalProps>
                       POPULAIRE MENSUEL (15.000 FCFA / mois)
                     </span>
                     <span className="text-[10px] text-yellow-300 font-bold uppercase">
-                      Offre Gold • 1 mois (+30 jours)
+                      Plan Star • 1 mois (+30 jours)
                     </span>
                   </div>
                 </div>
