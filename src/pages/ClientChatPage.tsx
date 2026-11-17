@@ -17,6 +17,9 @@ import {
   fetchMessages,
   fetchClients,
   getOrCreateClientId,
+  canPharmacyUseChat,
+  refreshChatAndGardes,
+  subscribeChatError,
 } from '../services/store';
 import { playNotificationSound } from '../services/sound';
 import { compressChatImage } from '../utils/imageCompressor';
@@ -42,6 +45,7 @@ import {
   MoreVertical,
   Ban,
   ShieldAlert,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ClientChatPageProps {
@@ -164,11 +168,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   onBack,
 }) => {
   const pharmacy = pharmacies.find((p) => p.id === pharmacieId) || pharmacies[0];
-  const canClientChat = Boolean(
-    pharmacy &&
-      (pharmacy.is_garde ?? pharmacy.is_online) &&
-      pharmacy.is_active !== false
-  );
+  const canClientChat = canPharmacyUseChat(pharmacy);
 
   // Persistent client ID (clients.id)
   const [clientId] = useState(() => getOrCreateClientId());
@@ -177,6 +177,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [pharmaOnline, setPharmaOnline] = useState(pharmacy ? pharmacy.is_online : false);
   const [showInfoBanner, setShowInfoBanner] = useState(false);
 
@@ -223,11 +224,44 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
   const pharmaciesRef = useRef(pharmacies);
   pharmaciesRef.current = pharmacies;
 
-  // Auto clean 24H execution on mount
+  // Auto clean 24H execution on mount + écouter les erreurs éventuelles d'INSERT chat
   useEffect(() => {
     cleanExpiredMessages();
     fetchClients().catch(() => {});
+    return subscribeChatError((errMsg) => {
+      showToast(errMsg);
+    });
   }, []);
+
+  const handleManualRefresh = async () => {
+    if (!pharmacy || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const pharmacyUserId =
+        (pharmacy as any).owner_user_id ||
+        (pharmacy as any).user_id ||
+        pharmacy.id;
+      const res = await refreshChatAndGardes({
+        pharmacyId: pharmacy.id,
+        clientId,
+        pharmacyUserId,
+        conversationId: conversation?.id,
+      });
+      if (conversation?.id) {
+        setMessages(res.messages);
+        prevMessagesCountRef.current = res.messages.length;
+      }
+      const updatedPharma = res.pharmacies.find((p) => p.id === pharmacy.id);
+      if (updatedPharma) {
+        setPharmaOnline(Boolean(updatedPharma.is_garde ?? updatedPharma.is_online));
+      }
+    } catch (err) {
+      console.error('[EFA CHAT] Erreur rafraîchissement client:', err);
+      showToast('Erreur lors du rafraîchissement');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Initialize & resolve unique shared conversation in Supabase
   useEffect(() => {
@@ -403,6 +437,8 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         type: 'text',
         senderId: clientId,
         receiverId: conversation.pharmacy_user_id || pharmacy?.id || 'pharma-1',
+        pharmacyId: pharmacy?.id,
+        clientId,
       });
       setInputText('');
       if (textareaRef.current) {
@@ -499,6 +535,10 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
             type: 'audio',
             media_url: audioUrl,
             audio_duration: duration,
+            senderId: clientId,
+            receiverId: conversation.pharmacy_user_id || pharmacy?.id || 'pharma-1',
+            pharmacyId: pharmacy?.id,
+            clientId,
           });
           setIsSending(false);
         }
@@ -608,6 +648,10 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
       addMessage(conversation.id, 'client', pendingPhoto.caption.trim() || '📷 Photo', {
         type: 'image',
         media_url: imageUrl,
+        senderId: clientId,
+        receiverId: conversation.pharmacy_user_id || pharmacy?.id || 'pharma-1',
+        pharmacyId: pharmacy?.id,
+        clientId,
       });
 
       URL.revokeObjectURL(pendingPhoto.previewUrl);
@@ -667,7 +711,13 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         const itineraryUrl = `https://www.google.com/maps/dir/?api=1&origin=${latitude.toFixed(5)},${longitude.toFixed(5)}&destination=${pharmacy.lat},${pharmacy.lng}&travelmode=driving`;
         const text = `📍 Ma position GPS & itinéraire : ${itineraryUrl}`;
         if (conversation) {
-          addMessage(conversation.id, 'client', text, { type: 'text' });
+          addMessage(conversation.id, 'client', text, {
+            type: 'text',
+            senderId: clientId,
+            receiverId: conversation.pharmacy_user_id || pharmacy?.id || 'pharma-1',
+            pharmacyId: pharmacy?.id,
+            clientId,
+          });
         }
       },
       (err) => {
@@ -778,6 +828,18 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
 
         {/* Right Header Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Bouton Rafraîchir (gardes + conversations + messages) */}
+          <button
+            type="button"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="px-2.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 active:bg-white/30 text-white flex items-center gap-1 text-xs font-bold border border-white/20 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+            title="Rafraîchir gardes et messages"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span className="text-[11px] sm:text-xs">Rafraîchir</span>
+          </button>
+
           {/* Bouton "Map" : itinéraire automatique Google Maps client -> pharmacie */}
           <button
             onClick={handleOpenGoogleMapsItinerary}
@@ -1004,7 +1066,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         {!canClientChat ? (
           <div className="p-3 max-w-5xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-2 text-slate-700">
             <span className="text-xs sm:text-sm font-semibold text-center sm:text-left">
-              Cette pharmacie n&apos;est pas de garde actuellement. Le chat est désactivé.
+              Le chat direct est réservé aux pharmacies de garde disposant d&apos;un abonnement actif (Standard 90.000F ou PLAN STAR).
             </span>
             <button
               type="button"

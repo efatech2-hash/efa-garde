@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Pharmacie } from '../types';
 import { PharmacyMap } from '../components/PharmacyMap';
 import { PharmacyCard } from '../components/PharmacyCard';
-import { trackItineraryClick, recordClientContact, fetchApprovedPharmacies, fetchDemandesAbonnement, getPharmacyListTier } from '../services/store';
+import { trackItineraryClick, recordClientContact, fetchApprovedPharmacies, fetchDemandesAbonnement, getPharmacyListTier, canPharmacyUseChat, refreshChatAndGardes } from '../services/store';
 import {
   get3ClosestPharmacies,
   getDistance,
@@ -50,6 +50,7 @@ export const Map: React.FC<MapProps> = ({
   const [shareFeedback, setShareFeedback] = useState(false);
   const [showInstallHelpModal, setShowInstallHelpModal] = useState(false);
   const [fetchedPharmacies, setFetchedPharmacies] = useState<Pharmacie[]>([]);
+  const [isRefreshingList, setIsRefreshingList] = useState(false);
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
 
   const handleInstallWebApp = async () => {
@@ -377,18 +378,26 @@ export const Map: React.FC<MapProps> = ({
             </h2>
 
             <button
-              onClick={() => {
-                fetchApprovedPharmacies()
-                  .then((list) => {
-                    if (Array.isArray(list)) setFetchedPharmacies(list);
-                  })
-                  .catch(() => {});
-                onRefresh();
+              type="button"
+              onClick={async () => {
+                if (isRefreshingList) return;
+                setIsRefreshingList(true);
+                try {
+                  const res = await refreshChatAndGardes();
+                  if (Array.isArray(res.pharmacies)) {
+                    setFetchedPharmacies(res.pharmacies);
+                  }
+                  onRefresh();
+                } finally {
+                  setIsRefreshingList(false);
+                }
               }}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
-              title="Rafraîchir"
+              disabled={isRefreshingList}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-60"
+              title="Rafraîchir gardes, conversations et messages"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingList ? 'animate-spin' : ''}`} />
+              <span>Rafraîchir</span>
             </button>
           </div>
 
@@ -491,9 +500,7 @@ export const Map: React.FC<MapProps> = ({
 
                   {/* Actions faciles au pouce : Appeler, Itinéraire, Chatter */}
                   {(() => {
-                    const canChat = Boolean(
-                      (p.is_garde ?? p.is_online) && p.is_active !== false
-                    );
+                    const canChat = canPharmacyUseChat(p);
                     return (
                       <div
                         className={`grid ${

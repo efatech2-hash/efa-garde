@@ -8,7 +8,7 @@ export type PlanType =
   | 'populaire_annuel';
 
 export type SubscriptionPlan = 'basic' | 'premium';
-export type SubscriptionStatus = 'active' | 'inactive';
+export type SubscriptionStatus = 'active' | 'inactive' | 'expired';
 
 export interface Pharmacie {
   id: string;
@@ -115,6 +115,8 @@ export interface Conversation {
 export interface Message {
   id: string;
   conversation_id: string;
+  pharmacy_id?: string;
+  client_id?: string;
   sender_id?: string;
   receiver_id?: string;
   sender_type?: 'client' | 'pharma' | 'admin' | 'system';

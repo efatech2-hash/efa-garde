@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pharmacie } from '../types';
 import { getGoogleMapsNavigationUrl, formatDistanceUser } from '../utils/geo';
-import { trackItineraryClick, recordClientContact, getPharmacyListTier } from '../services/store';
+import { trackItineraryClick, recordClientContact, getPharmacyListTier, canPharmacyUseChat } from '../services/store';
 import { Phone, Navigation, MessageSquare, Star, CheckCircle2, XCircle, MapPin } from 'lucide-react';
 
 interface PharmacyCardProps {
@@ -21,7 +21,7 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
 }) => {
   const isOnline = Boolean(pharmacy.is_garde ?? pharmacy.is_online);
   const isActive = pharmacy.is_active !== false;
-  const canChat = Boolean(isOnline && isActive);
+  const canChat = canPharmacyUseChat(pharmacy);
   const tier = getPharmacyListTier(pharmacy);
   const isPopulaire = tier === 0;
   const isVertPaid = tier === 1;

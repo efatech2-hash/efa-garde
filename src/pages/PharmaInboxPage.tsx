@@ -18,6 +18,8 @@ import {
   getOrCreateSuperAdminConversation,
   fetchClients,
   getClientDisplayName,
+  refreshChatAndGardes,
+  subscribeChatError,
 } from '../services/store';
 import { compressChatImage } from '../utils/imageCompressor';
 import { playNotificationSound } from '../services/sound';
@@ -46,12 +48,13 @@ import {
   ShieldAlert,
   AlertCircle,
   CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
 
 interface PharmaInboxPageProps {
   pharmacies: Pharmacie[];
   activePharmaId: string;
-  onSelectActivePharma: (id: string) => void;
+  onSelectActivePharma?: (id: string) => void;
 }
 
 // Audio Player component for WhatsApp audio bubbles
@@ -165,7 +168,6 @@ const AudioBubblePlayer: React.FC<{ mediaUrl: string; duration?: number; isMe: b
 export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   pharmacies,
   activePharmaId,
-  onSelectActivePharma,
 }) => {
   const currentPharma = pharmacies.find((p) => p.id === activePharmaId) || pharmacies[0];
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -173,6 +175,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [fullViewImageUrl, setFullViewImageUrl] = useState<string | null>(null);
 
   // Toast & Modals
@@ -215,10 +218,46 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
 
-  // Auto clean 24h on mount
+  // Auto clean 24h on mount + écouter les erreurs éventuelles d'INSERT chat
   useEffect(() => {
     cleanExpiredMessages();
+    return subscribeChatError((errMsg) => {
+      showToast(errMsg);
+    });
   }, []);
+
+  const handleManualRefresh = async () => {
+    if (!currentPharma || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const pharmaUserId =
+        (currentPharma as any).owner_user_id ||
+        (currentPharma as any).user_id ||
+        currentPharma.id;
+      const res = await refreshChatAndGardes({
+        pharmacyId: currentPharma.id,
+        pharmacyUserId: pharmaUserId,
+        conversationId: selectedConvIdRef.current || undefined,
+      });
+      setConversations(res.conversations);
+      if (selectedConvIdRef.current) {
+        setMessages(res.messages);
+        prevMsgCountRef.current = res.messages.length;
+      } else if (res.conversations.length > 0) {
+        setSelectedConv(res.conversations[0]);
+        selectedConvIdRef.current = res.conversations[0].id;
+        const firstMsgs = await fetchMessages(res.conversations[0].id);
+        setMessages(firstMsgs);
+        prevMsgCountRef.current = firstMsgs.length;
+      }
+      showToast('Conversations et gardes actualisées');
+    } catch (err) {
+      console.error('[EFA CHAT] Erreur rafraîchissement:', err);
+      showToast('Erreur lors du rafraîchissement');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Synchronisation pure depuis le cache mémoire (SANS appel Supabase pour éviter toute boucle notifyChange)
   const syncLocalConvs = () => {
@@ -413,6 +452,8 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
         type: 'text',
         senderId: currentPharma?.id || 'pharma-1',
         receiverId: selectedConv.admin_id || selectedConv.client_id,
+        pharmacyId: currentPharma?.id,
+        clientId: selectedConv.admin_id || selectedConv.client_id,
       });
       setInputText('');
       setTimeout(() => {
@@ -468,6 +509,10 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
       addMessage(selectedConv.id, 'pharma', pendingPhoto.caption.trim() || '📷 Photo', {
         type: 'image',
         media_url: url,
+        senderId: currentPharma?.id,
+        receiverId: selectedConv.admin_id || selectedConv.client_id,
+        pharmacyId: currentPharma?.id,
+        clientId: selectedConv.admin_id || selectedConv.client_id,
       });
       URL.revokeObjectURL(pendingPhoto.previewUrl);
       setPendingPhoto(null);
@@ -532,6 +577,10 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
             type: 'audio',
             media_url: audioUrl,
             audio_duration: duration,
+            senderId: currentPharma?.id,
+            receiverId: selectedConv.admin_id || selectedConv.client_id,
+            pharmacyId: currentPharma?.id,
+            clientId: selectedConv.admin_id || selectedConv.client_id,
           });
         }
       } catch (err) {
@@ -614,24 +663,18 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0 flex-wrap">
-          {pharmacies.length > 1 && (
-            <select
-              value={currentPharma.id}
-              onChange={(e) => {
-                setSelectedConv(null);
-                selectedConvIdRef.current = null;
-                onSelectActivePharma(e.target.value);
-              }}
-              className="px-2.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-emerald-300 focus:outline-none focus:border-emerald-400 max-w-[180px]"
-              title="Sélectionner la pharmacie"
-            >
-              {pharmacies.map((ph) => (
-                <option key={ph.id} value={ph.id}>
-                  {ph.nom}
-                </option>
-              ))}
-            </select>
-          )}
+          {/* Bouton Rafraîchir visible (Gardes + Conversations + Messages) */}
+          <button
+            type="button"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 transition-all cursor-pointer disabled:opacity-60"
+            title="Rafraîchir gardes, conversations et messages"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>Rafraîchir</span>
+          </button>
+
           {/* Sound Toggle */}
           <button
             onClick={() => {

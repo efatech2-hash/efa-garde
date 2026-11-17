@@ -303,6 +303,83 @@ export function getPharmacyListTier(p: Partial<Pharmacie> | null | undefined): 0
   return 2;
 }
 
+/**
+ * Règle Chat Client :
+ * - Gratuit / enregistrement seul / expiré = PAS de bouton Chat
+ * - Seulement Standard 90.000F (annual / annuel / 90k / 60k actif)
+ *   + PLAN STAR 15.000F/140.000F (star_mensuel / star_annuel / populaire_* / etoile_doree actif)
+ *   quand is_garde = true ET is_active !== false
+ */
+export function canPharmacyUseChat(
+  p: Partial<Pharmacie> | null | undefined
+): boolean {
+  if (!p) return false;
+  if (p.is_active === false) return false;
+  const isGarde = Boolean(p.is_garde ?? p.is_online);
+  if (!isGarde) return false;
+
+  const subStatus = String(p.subscription_status || '').toLowerCase();
+  if (
+    subStatus === 'expired' ||
+    subStatus === 'rejete' ||
+    subStatus === 'canceled'
+  ) {
+    return false;
+  }
+
+  const rawEnd = p.subscription_end_at || p.subscription_end;
+  if (rawEnd) {
+    const endMs = new Date(rawEnd).getTime();
+    if (Number.isFinite(endMs) && endMs <= Date.now()) {
+      return false;
+    }
+  }
+  if (
+    typeof p.subscription_days_left === 'number' &&
+    p.subscription_days_left <= 0 &&
+    rawEnd
+  ) {
+    return false;
+  }
+
+  const planStr = String(p.plan || '').toLowerCase();
+  const subPlanStr = String(p.subscription_plan || '').toLowerCase();
+
+  if (planStr === 'free' || planStr === 'gratuit') {
+    return false;
+  }
+
+  // PLAN STAR 15.000F / 140.000F
+  const isStar = Boolean(
+    p.etoile_doree ||
+      p.is_premium ||
+      subPlanStr === 'premium' ||
+      planStr === 'populaire_mensuel' ||
+      planStr === 'populaire_annuel' ||
+      planStr.includes('star') ||
+      planStr === 'top'
+  );
+  if (isStar) {
+    return true;
+  }
+
+  // Standard 90.000F (annual / annuel_officine / 90k / 60k)
+  const isStandard90k =
+    planStr === 'annual' ||
+    planStr === '90k' ||
+    planStr === '60k' ||
+    planStr.includes('annuel') ||
+    planStr.includes('annual') ||
+    planStr.includes('standard') ||
+    Number(p.prix) >= 60000;
+
+  if (isStandard90k && (subStatus === 'active' || !rawEnd)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function sortPharmaciesPriority(list: Pharmacie[]): Pharmacie[] {
   return [...list].sort((a, b) => {
     const tierA = getPharmacyListTier(a);
@@ -348,6 +425,27 @@ function generateUuid(): string {
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+}
+
+/**
+ * Génère un UUID déterministe (RFC-4122) à partir de deux chaînes (ex: pharmacyId + clientId)
+ * afin que client & pharmacie produisent le même conversation_id valide (compatible UUID et TEXT).
+ */
+function deterministicUuidFromSeed(seed: string): string {
+  let h1 = 0xdeadbeef ^ seed.length;
+  let h2 = 0x41c6ce57 ^ seed.length;
+  let h3 = 0x9e3779b9;
+  let h4 = 0x85ebca6b;
+  for (let i = 0; i < seed.length; i++) {
+    const ch = seed.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ (ch + i), 2246822519);
+    h4 = Math.imul(h4 ^ (ch * 31), 3266489917);
+  }
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+  const raw = (hex(h1) + hex(h2) + hex(h3) + hex(h4)).slice(0, 32);
+  return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-4${raw.slice(13, 16)}-8${raw.slice(17, 20)}-${raw.slice(20, 32)}`;
 }
 
 function parseCoord(val: unknown, fallback: number): number {
@@ -416,30 +514,50 @@ function applyAbonnementsToPharmacies(
   if (!Array.isArray(abns) || abns.length === 0) return list;
 
   const nowMs = Date.now();
-  const validAbns = abns.filter((a) => {
-    const st = (a.statut || '').toLowerCase();
-    const isPaid = st === 'paye_valide' || st === 'active' || st === 'actif';
-    if (!isPaid) return false;
-    if (a.expire_le) {
-      const expMs = new Date(a.expire_le).getTime();
-      if (Number.isFinite(expMs) && expMs < nowMs) return false;
-    }
-    return true;
-  });
+  const isPaidStatut = (st?: string) => {
+    const s = (st || '').toLowerCase();
+    return s === 'paye_valide' || s === 'active' || s === 'actif';
+  };
+  const isExpiredRow = (a: DemandeAbonnement) => {
+    if (!a.expire_le) return false;
+    const expMs = new Date(a.expire_le).getTime();
+    return Number.isFinite(expMs) && expMs <= nowMs;
+  };
 
-  if (validAbns.length === 0) return list;
+  const validAbns = abns.filter((a) => isPaidStatut(a.statut) && !isExpiredRow(a));
+  const expiredAbns = abns.filter((a) => isPaidStatut(a.statut) && isExpiredRow(a));
 
   return list.map((p) => {
     const cleanName = (p.nom || '').trim().toLowerCase();
-    const matches = validAbns.filter((a) => {
+    const matchesTarget = (a: DemandeAbonnement) => {
       const abnPharmaId = a.pharmacy_id || a.pharmacie_id;
       if (abnPharmaId && p.id && abnPharmaId === p.id) return true;
       const abnNom = (a.nom_pharmacie || '').trim().toLowerCase();
       if (abnNom && cleanName && abnNom === cleanName) return true;
       return false;
-    });
+    };
 
-    if (matches.length === 0) return p;
+    const matches = validAbns.filter(matchesTarget);
+
+    if (matches.length === 0) {
+      // Si l'officine avait uniquement des abonnements expirés et pas d'autre actif,
+      // on marque l'abonnement comme expiré pour masquer le bouton Chat
+      const hasOnlyExpiredAbn = expiredAbns.some(matchesTarget);
+      const rawEnd = p.subscription_end_at || p.subscription_end;
+      const hasExpiredPharmaDate =
+        Boolean(rawEnd) &&
+        Number.isFinite(new Date(rawEnd as string).getTime()) &&
+        new Date(rawEnd as string).getTime() <= nowMs;
+      if (hasOnlyExpiredAbn || hasExpiredPharmaDate) {
+        return {
+          ...p,
+          subscription_status: 'expired',
+          etoile_doree: false,
+          is_premium: false,
+        };
+      }
+      return p;
+    }
 
     const starMatch = matches.find((a) => isStarPlanName(a.plan));
     if (starMatch) {
@@ -453,6 +571,30 @@ function applyAbonnementsToPharmacies(
         subscription_plan: 'premium',
         subscription_status: 'active',
         subscription_end_at: starMatch.expire_le || p.subscription_end_at,
+      };
+    }
+
+    // Prioriser Standard 90.000F / annuel avant enregistrement_25k
+    const annualMatch = matches.find((a) => {
+      const lower = (a.plan || '').toLowerCase();
+      return (
+        lower.includes('annuel') ||
+        lower.includes('annual') ||
+        lower.includes('90') ||
+        lower.includes('60') ||
+        lower.includes('standard') ||
+        Number(a.montant) >= 60000
+      );
+    });
+    if (annualMatch) {
+      return {
+        ...p,
+        plan: 'annual',
+        is_registered: true,
+        subscription_plan: 'basic',
+        subscription_status: 'active',
+        subscription_end_at: annualMatch.expire_le || p.subscription_end_at,
+        prix: Number(annualMatch.montant) || 90000,
       };
     }
 
@@ -1790,11 +1932,11 @@ export async function fetchClientsCount(): Promise<number> {
 }
 
 export function getOrCreateClientId(): string {
-  if (typeof window === 'undefined') return 'client-guest-1';
+  if (typeof window === 'undefined') return '00000000-0000-4000-8000-000000000001';
   let cid =
     localStorage.getItem('client_id') || localStorage.getItem('efa_client_id');
   if (!cid) {
-    cid = 'client-' + Math.random().toString(36).substring(2, 9);
+    cid = generateUuid();
   }
   localStorage.setItem('client_id', cid);
   localStorage.setItem('efa_client_id', cid);
@@ -2151,11 +2293,29 @@ export async function validateSubscriptionPaymentAndGenerateCode(
         console.error('[EFA GARDE] Erreur UPDATE abonnements:', abnErr);
       }
 
-      // 3) UPDATE pharmacies SET is_active=true WHERE id=pharmacie_id (sans toucher is_garde)
+      // 3) UPDATE pharmacies SET is_active=true (+ plan & subscription_status) WHERE id=pharmacie_id (sans toucher is_garde)
       if (targetPharmaId) {
         const isStar = isStarPlanName(effectivePlan);
+        const lowerEffPlan = effectivePlan.toLowerCase();
+        const isAnnual90k =
+          lowerEffPlan.includes('annuel') ||
+          lowerEffPlan.includes('annual') ||
+          lowerEffPlan.includes('90') ||
+          effectiveMontant >= 60000;
+        const pharmaPlanValue: PlanType = isStar
+          ? lowerEffPlan.includes('annuel')
+            ? 'populaire_annuel'
+            : 'populaire_mensuel'
+          : isAnnual90k
+          ? 'annual'
+          : 'register';
+
         const pharmaUpdate: Record<string, any> = {
           is_active: true,
+          plan: pharmaPlanValue,
+          subscription_plan: isStar ? 'premium' : 'basic',
+          subscription_status: 'active',
+          subscription_end_at: effectiveExpireLe,
           updated_at: now,
         };
         if (isStar) {
@@ -2440,6 +2600,24 @@ export function loadConversations(
   return all;
 }
 
+type ChatErrorListener = (errorMessage: string) => void;
+const chatErrorListeners = new Set<ChatErrorListener>();
+
+export function subscribeChatError(fn: ChatErrorListener): () => void {
+  chatErrorListeners.add(fn);
+  return () => {
+    chatErrorListeners.delete(fn);
+  };
+}
+
+function notifyChatError(errorMessage: string) {
+  chatErrorListeners.forEach((fn) => {
+    try {
+      fn(errorMessage);
+    } catch {}
+  });
+}
+
 export async function fetchConversations(
   pharmacieId?: string,
   clientId?: string,
@@ -2463,33 +2641,156 @@ export async function fetchConversations(
       }
 
       if (error) {
-        console.error('[EFA GARDE] fetchConversations error:', error.message);
+        const noOrderRes = await sb.from('conversations').select('*');
+        data = noOrderRes.data;
+        error = noOrderRes.error;
       }
 
-      if (!error && Array.isArray(data)) {
-        const normalized: Conversation[] = data.map((row: any) => {
-          const pid = row.pharmacy_id || row.pharmacie_id || '';
-          return {
-            ...row,
-            pharmacy_id: pid,
-            pharmacie_id: row.pharmacie_id || pid,
-            client_id: row.client_id || row.admin_id || 'client',
-            admin_id: row.admin_id || undefined,
-          };
-        });
+      if (error) {
+        console.error('[EFA CHAT] SELECT conversations échoué:', error.message, error);
+      }
 
-        // Merge avec les conversations en mémoire si pas encore persistées
-        const seen = new Set(normalized.map((c) => c.id));
-        const merged = [...normalized];
-        for (const memC of memoryConversations) {
-          if (memC && memC.id && !seen.has(memC.id)) {
-            merged.push(memC);
+      const normalized: Conversation[] = Array.isArray(data)
+        ? data.map((row: any) => {
+            const pid = row.pharmacy_id || row.pharmacie_id || '';
+            return {
+              ...row,
+              pharmacy_id: pid,
+              pharmacie_id: row.pharmacie_id || pid,
+              client_id: row.client_id || row.admin_id || 'client',
+              admin_id: row.admin_id || undefined,
+            };
+          })
+        : [];
+
+      // Merge avec les conversations en mémoire si pas encore persistées
+      const seen = new Set(normalized.map((c) => c.id));
+      const merged = [...normalized];
+      for (const memC of memoryConversations) {
+        if (memC && memC.id && !seen.has(memC.id)) {
+          merged.push(memC);
+          seen.add(memC.id);
+        }
+      }
+
+      // Filet de sécurité : récupérer aussi les messages récents (24h) pour garantir la réciprocité
+      // même si un UPDATE sur `conversations` a échoué ou si la conversation n'existait pas côté local.
+      try {
+        const cutoff24h = new Date(Date.now() - MS_24_HOURS).toISOString();
+        let { data: recentMsgs, error: msgFetchErr } = await sb
+          .from('messages')
+          .select('*')
+          .gte('created_at', cutoff24h)
+          .order('created_at', { ascending: true });
+
+        if (msgFetchErr) {
+          const fallbackMsgs = await sb.from('messages').select('*');
+          recentMsgs = fallbackMsgs.data;
+        }
+
+        if (Array.isArray(recentMsgs)) {
+          for (const rawM of recentMsgs as any[]) {
+            const cId = rawM.conversation_id;
+            if (!cId) continue;
+
+            const existingConv = merged.find((c) => c.id === cId);
+            const deducedSender: 'client' | 'pharma' | 'admin' =
+              rawM.sender ||
+              rawM.sender_type ||
+              (rawM.sender_id &&
+              (rawM.sender_id === rawM.pharmacy_id ||
+                rawM.sender_id === existingConv?.pharmacy_id ||
+                rawM.sender_id === existingConv?.pharmacy_user_id)
+                ? 'pharma'
+                : rawM.sender_id === 'super-admin'
+                ? 'admin'
+                : 'client');
+
+            const mObj: Message = {
+              id: String(rawM.id || generateUuid()),
+              conversation_id: cId,
+              pharmacy_id: rawM.pharmacy_id || existingConv?.pharmacy_id,
+              client_id: rawM.client_id || existingConv?.client_id,
+              sender_id: rawM.sender_id,
+              receiver_id: rawM.receiver_id,
+              sender_type: rawM.sender_type || deducedSender,
+              sender: deducedSender,
+              content: rawM.content || rawM.text || '',
+              text: rawM.text || rawM.content || '',
+              type: rawM.type || 'text',
+              media_url: rawM.media_url,
+              audio_duration: rawM.audio_duration,
+              is_read: Boolean(rawM.is_read),
+              created_at: rawM.created_at || new Date().toISOString(),
+              expires_at: rawM.expires_at,
+            };
+
+            if (isMessageExpired(mObj)) continue;
+
+            const curList = memoryMessages[cId] || [];
+            if (!curList.some((x) => x.id === mObj.id)) {
+              curList.push(mObj);
+              curList.sort(
+                (a, b) =>
+                  new Date(a.created_at).getTime() -
+                  new Date(b.created_at).getTime()
+              );
+              memoryMessages[cId] = curList;
+            }
+
+            const preview =
+              mObj.type === 'audio'
+                ? '🎤 Message vocal'
+                : mObj.type === 'image'
+                ? '📷 Photo'
+                : mObj.text || '';
+
+            if (!existingConv) {
+              const pId =
+                rawM.pharmacy_id ||
+                (deducedSender === 'pharma' ? rawM.sender_id : rawM.receiver_id) ||
+                '';
+              const clId =
+                rawM.client_id ||
+                (deducedSender === 'client' ? rawM.sender_id : rawM.receiver_id) ||
+                'client';
+              if (pId || clId) {
+                const synthConv: Conversation = {
+                  id: cId,
+                  client_id: clId,
+                  pharmacy_id: pId,
+                  pharmacie_id: pId,
+                  pharmacy_user_id: pId,
+                  last_message: preview,
+                  last_message_at: mObj.created_at,
+                  created_at: mObj.created_at,
+                  updated_at: mObj.created_at,
+                  unread_count_pharmacy: deducedSender === 'client' ? 1 : 0,
+                  unread_count_client: deducedSender === 'pharma' ? 1 : 0,
+                };
+                merged.unshift(synthConv);
+                seen.add(cId);
+              }
+            } else {
+              const existingTime = new Date(
+                existingConv.last_message_at || existingConv.updated_at || 0
+              ).getTime();
+              const msgTime = new Date(mObj.created_at).getTime();
+              if (msgTime >= existingTime) {
+                existingConv.last_message = preview || existingConv.last_message;
+                existingConv.last_message_at = mObj.created_at;
+                existingConv.updated_at = mObj.created_at;
+              }
+            }
           }
         }
-        memoryConversations = merged;
-        notifyChange();
-        return loadConversations(pharmacieId, clientId, pharmacyUserId);
+      } catch (msgRecoveryErr) {
+        console.warn('[EFA CHAT] Recovery messages récents:', msgRecoveryErr);
       }
+
+      memoryConversations = merged;
+      notifyChange();
+      return loadConversations(pharmacieId, clientId, pharmacyUserId);
     }
   } catch (err) {
     console.warn('fetchConversations error:', err);
@@ -2497,32 +2798,77 @@ export async function fetchConversations(
   return loadConversations(pharmacieId, clientId, pharmacyUserId);
 }
 
-const inFlightConversationInserts = new Map<string, Promise<void>>();
+const inFlightConversationInserts = new Map<string, Promise<string>>();
 const persistedConversationIds = new Set<string>();
 
-async function ensureConversationInDB(conv: Conversation): Promise<void> {
-  if (persistedConversationIds.has(conv.id)) return;
+function remapConversationIdInMemory(oldId: string, newId: string, dbConv?: Partial<Conversation>) {
+  if (!oldId || !newId || oldId === newId) return;
+  const idx = memoryConversations.findIndex((c) => c.id === oldId);
+  if (idx >= 0) {
+    memoryConversations[idx] = {
+      ...memoryConversations[idx],
+      ...(dbConv || {}),
+      id: newId,
+    };
+  }
+  if (memoryMessages[oldId]) {
+    const existingNew = memoryMessages[newId] || [];
+    const seen = new Set(existingNew.map((m) => m.id));
+    for (const m of memoryMessages[oldId]) {
+      const migrated = { ...m, conversation_id: newId };
+      if (!seen.has(migrated.id)) {
+        existingNew.push(migrated);
+      }
+    }
+    memoryMessages[newId] = existingNew;
+    delete memoryMessages[oldId];
+  }
+}
+
+async function ensureConversationInDB(conv: Conversation): Promise<string> {
+  if (persistedConversationIds.has(conv.id)) return conv.id;
   const existingPromise = inFlightConversationInserts.get(conv.id);
   if (existingPromise) {
     return existingPromise;
   }
 
-  const p = (async () => {
+  const p = (async (): Promise<string> => {
     try {
       const sb = getSupabaseClient();
-      if (!sb) return;
+      if (!sb) return conv.id;
 
-      // Vérifie d'abord si l'ID existe déjà en DB
-      const { data: existingRow } = await sb
+      // 1) Vérifie si cet ID existe déjà en DB
+      const { data: byIdRow } = await sb
         .from('conversations')
         .select('id')
         .eq('id', conv.id)
         .limit(1)
         .maybeSingle();
 
-      if (existingRow?.id) {
-        persistedConversationIds.add(conv.id);
-        return;
+      if (byIdRow?.id) {
+        persistedConversationIds.add(byIdRow.id);
+        return byIdRow.id;
+      }
+
+      // 2) Vérifie si une conversation existe déjà pour (client_id, pharmacy_id)
+      if (conv.client_id && conv.pharmacy_id) {
+        const { data: byPairRows } = await sb
+          .from('conversations')
+          .select('*')
+          .eq('client_id', conv.client_id)
+          .or(
+            `pharmacy_id.eq.${conv.pharmacy_id},pharmacie_id.eq.${conv.pharmacy_id}`
+          )
+          .limit(1);
+
+        if (Array.isArray(byPairRows) && byPairRows.length > 0 && byPairRows[0]?.id) {
+          const existingDbConv = byPairRows[0];
+          persistedConversationIds.add(existingDbConv.id);
+          if (existingDbConv.id !== conv.id) {
+            remapConversationIdInMemory(conv.id, existingDbConv.id, existingDbConv);
+          }
+          return existingDbConv.id;
+        }
       }
 
       const fullRow: Record<string, any> = {
@@ -2554,7 +2900,7 @@ async function ensureConversationInDB(conv: Conversation): Promise<void> {
         !error.message?.includes('duplicate')
       ) {
         console.warn(
-          '[EFA GARDE] UPSERT conversations complet échoué, tentative core:',
+          '[EFA CHAT] UPSERT conversations complet échoué, tentative core:',
           error.message
         );
         const coreRes = await sb.from('conversations').upsert(
@@ -2593,16 +2939,43 @@ async function ensureConversationInDB(conv: Conversation): Promise<void> {
       }
 
       if (
+        error &&
+        error.code !== '23505' &&
+        !error.message?.includes('duplicate')
+      ) {
+        // Fallback si DB génère elle-même un UUID par défaut
+        const noIdRes = await sb
+          .from('conversations')
+          .insert([
+            {
+              client_id: conv.client_id,
+              pharmacy_id: conv.pharmacy_id,
+              last_message: conv.last_message || '',
+            },
+          ])
+          .select('id')
+          .single();
+        if (!noIdRes.error && noIdRes.data?.id) {
+          persistedConversationIds.add(noIdRes.data.id);
+          remapConversationIdInMemory(conv.id, noIdRes.data.id);
+          return noIdRes.data.id;
+        }
+        error = noIdRes.error || error;
+      }
+
+      if (
         !error ||
         error.code === '23505' ||
         error.message?.includes('duplicate')
       ) {
         persistedConversationIds.add(conv.id);
       } else {
-        console.error('[EFA GARDE] INSERT conversations:', error.message);
+        console.error('[EFA CHAT] INSERT conversations échoué:', error.message, error);
       }
+      return conv.id;
     } catch (err) {
-      console.warn('[EFA GARDE] ensureConversationInDB warning:', err);
+      console.warn('[EFA CHAT] ensureConversationInDB warning:', err);
+      return conv.id;
     } finally {
       inFlightConversationInserts.delete(conv.id);
     }
@@ -2633,8 +3006,9 @@ export function getOrCreateConversation(
   }
 
   const now = new Date().toISOString();
+  const sharedConvId = deterministicUuidFromSeed(`${pharmacieId}::${clientId}`);
   const newConv: Conversation = {
-    id: `conv-${pharmacieId}-${clientId}`,
+    id: sharedConvId,
     client_id: clientId,
     pharmacy_id: pharmacieId,
     pharmacie_id: pharmacieId,
@@ -2670,13 +3044,24 @@ export async function resolveOrCreateConversation(
   try {
     const sb = getSupabaseClient();
     if (sb) {
-      const { data, error } = await sb
+      let { data, error } = await sb
         .from('conversations')
         .select('*')
         .eq('client_id', clientId)
         .or(`pharmacy_id.eq.${pharmacieId},pharmacie_id.eq.${pharmacieId}`)
         .order('last_message_at', { ascending: false })
         .limit(1);
+
+      if (error) {
+        const fb = await sb
+          .from('conversations')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('pharmacy_id', pharmacieId)
+          .limit(1);
+        data = fb.data;
+        error = fb.error;
+      }
 
       if (!error && Array.isArray(data) && data.length > 0) {
         const row: any = data[0];
@@ -2699,11 +3084,15 @@ export async function resolveOrCreateConversation(
       }
     }
   } catch (err) {
-    console.warn('[EFA GARDE] resolveOrCreateConversation lookup warning:', err);
+    console.warn('[EFA CHAT] resolveOrCreateConversation lookup warning:', err);
   }
 
   const conv = getOrCreateConversation(clientId, pharmacieId, pharmacyUserId);
-  await ensureConversationInDB(conv);
+  const confirmedId = await ensureConversationInDB(conv);
+  if (confirmedId && confirmedId !== conv.id) {
+    const updated = memoryConversations.find((c) => c.id === confirmedId);
+    if (updated) return updated;
+  }
   return conv;
 }
 
@@ -2724,7 +3113,7 @@ export function getOrCreateSuperAdminConversation(
 
   const now = new Date().toISOString();
   const newConv: Conversation = {
-    id: `conv-admin-${pharmacieId}`,
+    id: deterministicUuidFromSeed(`${pharmacieId}::super-admin`),
     client_id: 'super-admin',
     admin_id: adminId,
     pharmacy_id: pharmacieId,
@@ -2776,18 +3165,47 @@ export async function fetchMessages(
       }
 
       if (error) {
-        console.error('[EFA GARDE] fetchMessages error:', error.message);
+        const minFb = await sb
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationId);
+        data = minFb.data;
+        error = minFb.error;
+      }
+
+      if (error) {
+        console.error('[EFA CHAT] fetchMessages error:', error.message, error);
       }
 
       if (!error && Array.isArray(data)) {
+        const conv = memoryConversations.find((c) => c.id === conversationId);
         const msgs = (data as any[])
-          .map((m) => ({
-            ...m,
-            sender: (m.sender || m.sender_type || 'client') as 'client' | 'pharma' | 'admin',
-            text: m.text || m.content || '',
-            content: m.content || m.text || '',
-          }))
-          .filter((m) => !isMessageExpired(m)) as Message[];
+          .map((m) => {
+            const deducedSender: 'client' | 'pharma' | 'admin' =
+              m.sender ||
+              m.sender_type ||
+              (m.sender_id &&
+              (m.sender_id === m.pharmacy_id ||
+                m.sender_id === conv?.pharmacy_id ||
+                m.sender_id === conv?.pharmacy_user_id)
+                ? 'pharma'
+                : m.sender_id === 'super-admin'
+                ? 'admin'
+                : 'client');
+            return {
+              ...m,
+              pharmacy_id: m.pharmacy_id || conv?.pharmacy_id,
+              client_id: m.client_id || conv?.client_id,
+              sender: deducedSender,
+              text: m.text || m.content || '',
+              content: m.content || m.text || '',
+            };
+          })
+          .filter((m) => !isMessageExpired(m))
+          .sort(
+            (a, b) =>
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          ) as Message[];
         memoryMessages[conversationId] = msgs;
         notifyChange();
         return msgs;
@@ -2809,6 +3227,8 @@ export function addMessage(
     audio_duration?: number;
     senderId?: string;
     receiverId?: string;
+    pharmacyId?: string;
+    clientId?: string;
     senderType?: 'client' | 'pharma' | 'admin' | 'system';
   }
 ): Message {
@@ -2837,18 +3257,39 @@ export function addMessage(
     (sender === 'admin'
       ? conv?.admin_id || 'super-admin'
       : sender === 'client'
-      ? conv?.client_id || getOrCreateClientId()
-      : conv?.pharmacy_user_id || conv?.pharmacy_id || conv?.pharmacie_id || 'pharma-1');
+      ? mediaOptions?.clientId || conv?.client_id || getOrCreateClientId()
+      : mediaOptions?.pharmacyId ||
+        conv?.pharmacy_id ||
+        conv?.pharmacie_id ||
+        conv?.pharmacy_user_id ||
+        'pharma-1');
 
   const receiverId =
     mediaOptions?.receiverId ||
     (sender === 'pharma'
-      ? conv?.admin_id || conv?.client_id || getOrCreateClientId()
-      : conv?.pharmacy_user_id || conv?.pharmacy_id || conv?.pharmacie_id || 'pharma-1');
+      ? mediaOptions?.clientId || conv?.admin_id || conv?.client_id || getOrCreateClientId()
+      : mediaOptions?.pharmacyId ||
+        conv?.pharmacy_id ||
+        conv?.pharmacie_id ||
+        conv?.pharmacy_user_id ||
+        'pharma-1');
+
+  const resolvedPharmacyId =
+    mediaOptions?.pharmacyId ||
+    conv?.pharmacy_id ||
+    conv?.pharmacie_id ||
+    (sender === 'pharma' ? senderId : receiverId);
+
+  const resolvedClientId =
+    mediaOptions?.clientId ||
+    conv?.client_id ||
+    (sender === 'client' ? senderId : receiverId);
 
   const newMsg: Message = {
-    id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    id: generateUuid(),
     conversation_id: conversationId,
+    pharmacy_id: resolvedPharmacyId,
+    client_id: resolvedClientId,
     sender_id: senderId,
     receiver_id: receiverId,
     sender_type: mediaOptions?.senderType || sender,
@@ -2907,18 +3348,22 @@ export function addMessage(
     } catch {}
   }
 
-  // 4. Synchronisation Supabase : attendre que `conversations` existe avant INSERT `messages` + refetch
+  // 4. Synchronisation Supabase : garantir `conversations` puis INSERT `messages`
+  //    avec conversation_id + sender_id + pharmacy_id + client_id
   void (async () => {
     try {
       const sb = getSupabaseClient();
-      if (!sb) return;
+      if (!sb) {
+        console.error('[EFA CHAT] Client Supabase indisponible pour INSERT messages.');
+        return;
+      }
 
       const convToEnsure: Conversation = conv || {
         id: conversationId,
-        client_id: sender === 'client' ? senderId : receiverId,
-        pharmacy_id: sender === 'pharma' ? senderId : receiverId,
-        pharmacie_id: sender === 'pharma' ? senderId : receiverId,
-        pharmacy_user_id: sender === 'pharma' ? senderId : receiverId,
+        client_id: resolvedClientId,
+        pharmacy_id: resolvedPharmacyId,
+        pharmacie_id: resolvedPharmacyId,
+        pharmacy_user_id: resolvedPharmacyId,
         last_message: summary,
         last_message_at: createdAt,
         unread_count_pharmacy: sender === 'client' ? 1 : 0,
@@ -2927,12 +3372,14 @@ export function addMessage(
         updated_at: createdAt,
       };
 
-      await ensureConversationInDB(convToEnsure);
+      const targetConvId = await ensureConversationInDB(convToEnsure);
 
       const fullMsgRow = {
         id: newMsg.id,
-        conversation_id: newMsg.conversation_id,
+        conversation_id: targetConvId,
         sender_id: newMsg.sender_id,
+        pharmacy_id: resolvedPharmacyId,
+        client_id: resolvedClientId,
         receiver_id: newMsg.receiver_id,
         sender_type: newMsg.sender_type,
         sender: newMsg.sender,
@@ -2949,16 +3396,22 @@ export function addMessage(
       let { error: msgErr } = await sb.from('messages').insert([fullMsgRow]);
 
       if (msgErr) {
-        console.warn('[EFA GARDE] INSERT messages complet échoué, tentative core:', msgErr.message);
+        console.warn(
+          '[EFA CHAT] INSERT messages complet échoué, tentative core (conversation_id + sender_id + pharmacy_id + client_id):',
+          msgErr.message
+        );
         const coreMsgRes = await sb.from('messages').insert([
           {
             id: newMsg.id,
-            conversation_id: newMsg.conversation_id,
+            conversation_id: targetConvId,
             sender_id: newMsg.sender_id,
+            pharmacy_id: resolvedPharmacyId,
+            client_id: resolvedClientId,
             receiver_id: newMsg.receiver_id,
             sender: newMsg.sender,
             content: newMsg.content,
             text: newMsg.text,
+            type: newMsg.type,
             created_at: newMsg.created_at,
           },
         ]);
@@ -2966,21 +3419,48 @@ export function addMessage(
       }
 
       if (msgErr) {
-        const minimalRes = await sb.from('messages').insert([
+        console.warn('[EFA CHAT] Tentative 3 INSERT messages (sans id/type):', msgErr.message);
+        const res3 = await sb.from('messages').insert([
           {
-            id: newMsg.id,
-            conversation_id: newMsg.conversation_id,
+            conversation_id: targetConvId,
             sender_id: newMsg.sender_id,
-            receiver_id: newMsg.receiver_id,
+            pharmacy_id: resolvedPharmacyId,
+            client_id: resolvedClientId,
+            sender: newMsg.sender,
             content: newMsg.content,
+            text: newMsg.text,
             created_at: newMsg.created_at,
           },
         ]);
-        msgErr = minimalRes.error;
+        msgErr = res3.error;
       }
 
       if (msgErr) {
-        console.error('[EFA GARDE] INSERT messages:', msgErr.message);
+        console.warn('[EFA CHAT] Tentative 4 INSERT messages minimal:', msgErr.message);
+        const res4 = await sb.from('messages').insert([
+          {
+            conversation_id: targetConvId,
+            sender_id: newMsg.sender_id,
+            pharmacy_id: resolvedPharmacyId,
+            client_id: resolvedClientId,
+            content: newMsg.content,
+          },
+        ]);
+        msgErr = res4.error;
+      }
+
+      if (msgErr) {
+        console.error('[EFA CHAT] ECHEC DEFINITIF INSERT messages Supabase:', {
+          code: msgErr.code,
+          message: msgErr.message,
+          details: msgErr.details,
+          hint: msgErr.hint,
+          conversation_id: targetConvId,
+          sender_id: newMsg.sender_id,
+          pharmacy_id: resolvedPharmacyId,
+          client_id: resolvedClientId,
+        });
+        notifyChatError(`Erreur envoi message (${msgErr.message})`);
       }
 
       const updateFields: Record<string, any> = {
@@ -2993,7 +3473,7 @@ export function addMessage(
       let { error: convUpdateErr } = await sb
         .from('conversations')
         .update(updateFields)
-        .eq('id', conversationId);
+        .eq('id', targetConvId);
       if (convUpdateErr) {
         const minUpd = await sb
           .from('conversations')
@@ -3001,17 +3481,18 @@ export function addMessage(
             last_message: conv?.last_message || summary,
             updated_at: conv?.updated_at || createdAt,
           })
-          .eq('id', conversationId);
+          .eq('id', targetConvId);
         convUpdateErr = minUpd.error;
       }
       if (convUpdateErr) {
-        console.warn('[EFA GARDE] UPDATE conversations:', convUpdateErr.message);
+        console.warn('[EFA CHAT] UPDATE conversations:', convUpdateErr.message);
       }
 
-      await fetchMessages(conversationId);
+      await fetchMessages(targetConvId);
       await fetchConversations();
-    } catch (err) {
-      console.warn('[EFA GARDE] addMessage Supabase warning:', err);
+    } catch (err: any) {
+      console.error('[EFA CHAT] addMessage Supabase exception:', err);
+      notifyChatError(`Erreur réseau chat : ${err?.message || 'échec envoi'}`);
     }
   })();
 
@@ -3793,6 +4274,8 @@ export function initSupabaseRealtime(): void {
               const msgObj: Message = {
                 id: newMsg.id,
                 conversation_id: convId,
+                pharmacy_id: newMsg.pharmacy_id,
+                client_id: newMsg.client_id,
                 sender: resolvedSender,
                 sender_type: newMsg.sender_type || resolvedSender,
                 sender_id: newMsg.sender_id,
@@ -3840,9 +4323,11 @@ export function initSupabaseRealtime(): void {
                 };
               } else {
                 const guessedClientId =
-                  resolvedSender === 'client' ? newMsg.sender_id : newMsg.receiver_id;
+                  newMsg.client_id ||
+                  (resolvedSender === 'client' ? newMsg.sender_id : newMsg.receiver_id);
                 const guessedPharmaId =
-                  resolvedSender === 'pharma' ? newMsg.sender_id : newMsg.receiver_id;
+                  newMsg.pharmacy_id ||
+                  (resolvedSender === 'pharma' ? newMsg.sender_id : newMsg.receiver_id);
                 if (guessedClientId && guessedPharmaId) {
                   memoryConversations.unshift({
                     id: convId,
@@ -4039,6 +4524,71 @@ export async function bootstrapStoreFromSupabase(
 
 export async function retryBootstrapStoreFromSupabase(): Promise<void> {
   return bootstrapStoreFromSupabase(true);
+}
+
+/**
+ * Bouton Rafraîchir global (Liste pharmacies + Chat client + Chat pharmacien) :
+ * Refetch gardes + pharmacies + abonnements + conversations + messages en parallèle.
+ */
+export async function refreshChatAndGardes(options?: {
+  pharmacyId?: string;
+  clientId?: string;
+  pharmacyUserId?: string;
+  conversationId?: string;
+}): Promise<{
+  pharmacies: Pharmacie[];
+  gardes: Garde[];
+  conversations: Conversation[];
+  messages: Message[];
+}> {
+  const [
+    gardesRes,
+    abnRes,
+    pharmaciesRes,
+    _clientsRes,
+    conversationsRes,
+    messagesRes,
+  ] = await Promise.allSettled([
+    fetchGardes(options?.pharmacyId),
+    fetchDemandesAbonnement(),
+    fetchApprovedPharmacies(),
+    fetchClients(),
+    fetchConversations(
+      options?.pharmacyId,
+      options?.clientId,
+      options?.pharmacyUserId
+    ),
+    options?.conversationId
+      ? fetchMessages(options.conversationId)
+      : Promise.resolve([] as Message[]),
+  ]);
+
+  void abnRes;
+
+  return {
+    gardes:
+      gardesRes.status === 'fulfilled'
+        ? gardesRes.value
+        : loadGardes(options?.pharmacyId),
+    pharmacies:
+      pharmaciesRes.status === 'fulfilled'
+        ? pharmaciesRes.value
+        : loadApprovedPharmacies(),
+    conversations:
+      conversationsRes.status === 'fulfilled'
+        ? conversationsRes.value
+        : loadConversations(
+            options?.pharmacyId,
+            options?.clientId,
+            options?.pharmacyUserId
+          ),
+    messages:
+      messagesRes.status === 'fulfilled'
+        ? messagesRes.value
+        : options?.conversationId
+        ? loadMessages(options.conversationId)
+        : [],
+  };
 }
 
 if (typeof window !== 'undefined') {
