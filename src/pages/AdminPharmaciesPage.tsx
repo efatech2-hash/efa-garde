@@ -101,8 +101,8 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
       adresse: 'Avenue de la Nouvelle Marche, Face Lycée Tokoin',
       phone: '+228 90 45 67 89',
       titulaire: 'Dr. Paul Koffi',
-      numero_ordre: 'ONPT-TOGO-0312',
-      email_pro: 'stjoseph@ordredespharmaciens.tg',
+      numero_ordre: 'AGR-TOGO-0312',
+      email_pro: 'stjoseph@efagarde.tg',
       lat: 6.142,
       lng: 1.218,
     });
@@ -134,7 +134,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
                   Administration EFA GARDE
                 </span>
-                <span className="text-xs text-slate-400 font-mono">Contrôle Ordre des Pharmaciens</span>
+                <span className="text-xs text-slate-400 font-mono">Contrôle Agrément Officines</span>
               </div>
               <h1 className="text-2xl font-black text-white tracking-tight mt-0.5">
                 Validation des Pharmaciens & Officines
@@ -342,7 +342,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
             </div>
             <h3 className="text-lg font-black text-white">Toutes les demandes sont traitées !</h3>
             <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Aucune officine n'est en attente de validation. Les demandes des pharmaciens inscrivant leur numéro d'Ordre apparaîtront ici.
+              Aucune officine n'est en attente de validation. Les demandes des pharmaciens inscrivant leur numéro d'agrément apparaîtront ici.
             </p>
             <button
               onClick={handleAddSamplePending}
@@ -372,7 +372,7 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-xs font-black uppercase px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5">
                           <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                          Ordre: {p.numero_ordre || 'En vérification'}
+                          Agrément: {p.numero_ordre || 'En vérification'}
                         </span>
 
                         <span
@@ -510,11 +510,11 @@ export const AdminPharmaciesPage: React.FC<AdminPharmaciesPageProps> = ({
                       {p.piece_url && (
                         <div className="space-y-1">
                           <span className="text-[11px] font-bold text-slate-400 block">
-                            Pièce / Carte d'Ordre :
+                            Pièce / Licence officielle :
                           </span>
                           <img
                             src={p.piece_url}
-                            alt="Carte Ordre"
+                            alt="Licence officielle"
                             className="w-24 h-16 object-cover rounded-xl border border-slate-700 shadow"
                           />
                         </div>

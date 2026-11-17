@@ -478,7 +478,7 @@ export const Map: React.FC<MapProps> = ({
                     <span className="truncate">{p.adresse}</span>
                   </div>
 
-                  {/* Actions faciles au pouce : Appeler, Itinéraire, Tchatter */}
+                  {/* Actions faciles au pouce : Appeler, Itinéraire, Chatter */}
                   {(() => {
                     const canChat = Boolean(
                       (p.is_garde ?? p.is_online) && p.is_active !== false
@@ -528,7 +528,7 @@ export const Map: React.FC<MapProps> = ({
                             title="Discuter en direct"
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
-                            <span>Tchatter</span>
+                            <span>Chatter</span>
                           </button>
                         )}
                       </div>

@@ -19,6 +19,8 @@ import {
   rejectSubscriptionPayment,
   loadPendingPharmacies,
   fetchPendingPharmacies,
+  fetchClients,
+  getClientDisplayName,
   approvePharmacySuperAdmin,
   rejectPharmacySuperAdmin,
   fetchConversations,
@@ -201,6 +203,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
 
   const refreshClientsCount = async () => {
     try {
+      await fetchClients().catch(() => {});
       const c = await fetchClientsCount();
       setClientsCount(c);
     } catch {}
@@ -1807,10 +1810,10 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                             <td className="py-3.5 px-4">
                               <div className="space-y-0.5">
                                 <p className="font-bold text-white text-xs">
-                                  Émetteur : <span className="text-amber-300">{s.reporter_id.startsWith('client') ? `Client #${s.reporter_id.replace('client-', '')}` : s.pharmacy_nom || 'Pharmacie'}</span>
+                                  Émetteur : <span className="text-amber-300">{s.reporter_id.startsWith('pharma') ? s.pharmacy_nom || 'Pharmacie' : getClientDisplayName(s.reporter_id)}</span>
                                 </p>
                                 <p className="text-[11px] text-slate-400">
-                                  Signalé : <span className="text-slate-300">{s.reported_id.startsWith('client') ? `Client #${s.reported_id.replace('client-', '')}` : s.pharmacy_nom || s.reported_id}</span>
+                                  Signalé : <span className="text-slate-300">{s.reported_id.startsWith('pharma') ? s.pharmacy_nom || s.reported_id : getClientDisplayName(s.reported_id)}</span>
                                 </p>
                               </div>
                             </td>
@@ -1951,7 +1954,7 @@ export const SuperAdminPage: React.FC<SuperAdminPageProps> = ({
                       }`}
                     >
                       <div className="text-[10px] font-bold opacity-75 mb-1 flex items-center gap-1.5">
-                        <span>{m.sender === 'pharma' ? '🏥 Officine' : '👤 Patient'}</span>
+                        <span>{m.sender === 'pharma' ? '🏥 Officine' : `👤 ${getClientDisplayName(m.sender_id || inspectConvoModal.signalement.reporter_id)}`}</span>
                         <span>•</span>
                         <span>{new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>

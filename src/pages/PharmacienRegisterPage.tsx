@@ -146,7 +146,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
     }
 
     if (!numeroOrdre.trim()) {
-      setErrorMsg("Le Numéro de l'Ordre National des Pharmaciens du Togo (ONPT) est obligatoire.");
+      setErrorMsg("Le Numéro d'agrément officiel de l'officine est obligatoire.");
       return;
     }
 
@@ -318,7 +318,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
                   Statut : En attente de validation admin
                 </p>
                 <p className="text-xs text-amber-200/80 mt-1">
-                  Paiement 25.000 FCFA vérifié et token consommé. Votre dossier avec le numéro d'Ordre ({numeroOrdre}) et IFU ({ifu}) est en cours d'examen par l'administration EFA GARDE. Votre officine sera activée sous 24h.
+                  Paiement 25.000 FCFA vérifié et token consommé. Votre dossier avec le numéro d'agrément ({numeroOrdre}) et IFU ({ifu}) est en cours d'examen par l'administration EFA GARDE. Votre officine sera activée sous 24h.
                 </p>
               </div>
             </div>
@@ -443,7 +443,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
               </div>
             </div>
 
-            {/* 2. Données Officine, IFU & Ordre */}
+            {/* 2. Données Officine, IFU & Agrément */}
             <div className="p-4 bg-slate-800/40 rounded-2xl border border-slate-800 space-y-3">
               <h3 className="text-xs font-black uppercase text-blue-400 tracking-wider flex items-center gap-1.5">
                 <Building className="w-3.5 h-3.5" />
@@ -485,22 +485,22 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
                     </span>
                   </div>
 
-                  {/* Numéro Ordre */}
+                  {/* Numéro Agrément */}
                   <div>
                     <label className="block text-amber-300 font-black mb-1 flex items-center gap-1">
                       <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                      Numéro Ordre (ONPT) <span className="text-red-400">*</span>
+                      Numéro d'agrément officiel <span className="text-red-400">*</span>
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="Ex: ONPT-TOGO-0248"
+                      placeholder="Ex: AGR-TOGO-0248"
                       value={numeroOrdre}
                       onChange={(e) => setNumeroOrdre(e.target.value)}
                       className="w-full bg-slate-800 text-amber-300 font-mono font-bold px-3 py-2.5 rounded-xl border border-amber-500/60 text-sm focus:border-amber-400 focus:outline-none shadow-sm"
                     />
                     <span className="text-[10px] text-slate-400 mt-0.5 block">
-                      Ordre National des Pharmaciens du Togo
+                      Agrément officiel d'exploitation (Togo)
                     </span>
                   </div>
                 </div>
@@ -627,10 +627,10 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {/* Pièce: Carte d'ordre ou autorisation */}
+                {/* Pièce: Licence ou autorisation */}
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">
-                    Justificatif : Licence / Carte d'Ordre
+                    Justificatif : Licence / Autorisation d'exploitation
                   </label>
                   <label className="border-2 border-dashed border-slate-700 hover:border-slate-500 rounded-xl p-3 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors bg-slate-800/60 min-h-[75px]">
                     <Upload className="w-4 h-4 text-amber-400" />
@@ -671,7 +671,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-start gap-2">
               <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <span>
-                <strong>Contrôle de vérification :</strong> Votre compte sera vérifié par l'Ordre sous 24h avant activation de votre accès au tableau de bord.
+                <strong>Contrôle de vérification :</strong> Votre compte sera vérifié par l'administration EFA GARDE sous 24h avant activation de votre accès au tableau de bord.
               </span>
             </div>
 
@@ -684,7 +684,7 @@ export const PharmacienRegisterPage: React.FC<PharmacienRegisterPageProps> = ({
               {isSubmitting ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Envoi du dossier officiel à l'Ordre...</span>
+                  <span>Envoi du dossier officiel...</span>
                 </>
               ) : (
                 <>

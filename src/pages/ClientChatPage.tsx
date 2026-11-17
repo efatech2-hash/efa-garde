@@ -14,6 +14,7 @@ import {
   markConversationAsRead,
   loadConversations,
   fetchMessages,
+  getOrCreateClientId,
 } from '../services/store';
 import { playNotificationSound } from '../services/sound';
 import { compressChatImage } from '../utils/imageCompressor';
@@ -167,15 +168,8 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
       pharmacy.is_active !== false
   );
 
-  // Persistent client guest ID
-  const [clientId] = useState(() => {
-    let id = localStorage.getItem('efa_client_id');
-    if (!id) {
-      id = 'client-' + Math.random().toString(36).substring(2, 9);
-      localStorage.setItem('efa_client_id', id);
-    }
-    return id;
-  });
+  // Persistent client ID (clients.id)
+  const [clientId] = useState(() => getOrCreateClientId());
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -364,7 +358,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
     if (!text || !conversation) return;
 
     if (!canClientChat) {
-      showToast('Tchat indisponible : cette pharmacie n’est pas de garde.');
+      showToast('Chat indisponible : cette pharmacie n’est pas de garde.');
       return;
     }
 
@@ -990,7 +984,7 @@ export const ClientChatPage: React.FC<ClientChatPageProps> = ({
         {!canClientChat ? (
           <div className="p-3 max-w-5xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-2 text-slate-700">
             <span className="text-xs sm:text-sm font-semibold text-center sm:text-left">
-              Cette pharmacie n&apos;est pas de garde actuellement. Le tchat est désactivé.
+              Cette pharmacie n&apos;est pas de garde actuellement. Le chat est désactivé.
             </span>
             <button
               type="button"

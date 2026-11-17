@@ -274,7 +274,7 @@ export const PharmaStatsPage: React.FC<PharmaStatsPageProps> = ({
             </div>
 
             <div className="text-xs text-slate-500 pt-2 border-t border-slate-100 flex items-center justify-between">
-              <span>Clics tchat & appels</span>
+              <span>Clics chat & appels</span>
               <span className="font-semibold text-slate-700">Moyenne : {(stats.totalThisWeek / 7).toFixed(1)}/jour</span>
             </div>
           </div>

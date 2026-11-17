@@ -60,7 +60,7 @@ export const Splash: React.FC<SplashProps> = ({ onComplete, duration = 2000 }) =
 
       {/* Footer Tagline */}
       <div className="absolute bottom-6 text-[11px] font-medium text-slate-400">
-        Ordre National des Pharmaciens du Togo
+        Réseau Officines de Garde • Lomé, Togo
       </div>
     </div>
   );

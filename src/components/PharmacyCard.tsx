@@ -201,7 +201,7 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
           <span>Itinéraire</span>
         </button>
 
-        {/* Tchatter : visible UNIQUEMENT si is_garde=true ET is_active=true */}
+        {/* Chatter : visible UNIQUEMENT si is_garde=true ET is_active=true */}
         {canChat && (
           <button
             onClick={() => {
@@ -211,7 +211,7 @@ export const PharmacyCard: React.FC<PharmacyCardProps> = ({
             className="min-h-[48px] flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/30 active:scale-95 cursor-pointer"
           >
             <MessageSquare className="w-4 h-4" />
-            <span>Tchatter</span>
+            <span>Chatter</span>
           </button>
         )}
       </div>

@@ -47,7 +47,7 @@ export const PharmaLayout: React.FC<PharmaLayoutProps> = ({
             </h1>
             <p className="text-sm text-slate-300 leading-relaxed">
               Votre demande d'activation pour{' '}
-              <span className="font-bold text-white">{pharmaNom || 'votre officine'}</span> est actuellement en cours d'examen auprès de l’Ordre National des Pharmaciens du Togo.
+              <span className="font-bold text-white">{pharmaNom || 'votre officine'}</span> est actuellement en cours d'examen par l’administration EFA GARDE.
             </p>
           </div>
 
@@ -61,7 +61,7 @@ export const PharmaLayout: React.FC<PharmaLayoutProps> = ({
               <span className="font-mono text-white">{session?.phone || 'Non renseigné'}</span>
             </div>
             <div className="flex items-center justify-between pt-1">
-              <span className="text-slate-400">Statut Ordre des Pharmaciens :</span>
+              <span className="text-slate-400">Statut validation officine :</span>
               <span className="font-bold text-amber-400 flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
                 En cours d'audit

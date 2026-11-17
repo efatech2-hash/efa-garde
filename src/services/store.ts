@@ -1409,38 +1409,155 @@ export function saveClients(clients: Client[]): void {
   notifyChange();
 }
 
+export async function fetchClients(): Promise<Client[]> {
+  try {
+    const sb = getSupabaseClient();
+    if (sb) {
+      const { data, error } = await sb
+        .from('clients')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        const mapped: Client[] = data.map((row: any) => ({
+          id: String(row.id),
+          nom: (row.nom || '').trim(),
+          telephone: (row.telephone || row.numero_whatsapp || row.numero || '').trim(),
+          numero: (row.numero || row.telephone || row.numero_whatsapp || '').trim(),
+          numero_whatsapp: (row.numero_whatsapp || row.telephone || row.numero || '').trim(),
+          email: row.email ? String(row.email).trim() : undefined,
+          date_inscription: row.date_inscription || row.created_at || new Date().toISOString(),
+          created_at: row.created_at || row.date_inscription,
+        }));
+        memoryClients = mapped;
+        memoryClientsCount = mapped.length;
+        notifyChange();
+        return mapped;
+      }
+      if (error) {
+        console.warn('[EFA GARDE] fetchClients error:', error.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[EFA GARDE] fetchClients warning:', err);
+  }
+  return memoryClients;
+}
+
+export function getClientDisplayName(clientId: string): string {
+  if (!clientId) return '';
+  const normalizedTarget = clientId.replace(/^client-/, '').trim();
+  const matched = memoryClients.find(
+    (c) =>
+      c.id === clientId ||
+      c.id === normalizedTarget ||
+      `client-${c.id}` === clientId
+  );
+
+  if (matched) {
+    if (matched.nom && matched.nom.trim()) {
+      return matched.nom.trim();
+    }
+    const tel =
+      matched.telephone?.trim() ||
+      matched.numero_whatsapp?.trim() ||
+      matched.numero?.trim();
+    if (tel) return tel;
+  }
+
+  if (typeof window !== 'undefined') {
+    const localId =
+      localStorage.getItem('client_id') || localStorage.getItem('efa_client_id');
+    if (localId && (localId === clientId || localId === normalizedTarget)) {
+      const localNom = localStorage.getItem('efa_client_nom')?.trim();
+      if (localNom) return localNom;
+      const localTel = localStorage.getItem('efa_client_whatsapp')?.trim();
+      if (localTel) return localTel;
+    }
+  }
+
+  return clientId;
+}
+
 /**
  * INSCRIPTION / RECONNEXION CLIENT :
- * 1) Cherche d'abord dans public.clients WHERE telephone = numero
- * 2) Si existe -> reconnecte-le (pas de doublon)
- * 3) Sinon -> INSERT INTO public.clients (nom, telephone)
- * 4) Sauvegarde client_id dans localStorage
+ * 1) Récupère/crée auth.users.id si session/email Supabase Auth disponible
+ * 2) Cherche dans public.clients WHERE telephone = numero (ou id = auth.users.id / email)
+ * 3) Si existe -> SELECT nom depuis clients & reconnecte sans doublon
+ * 4) Sinon -> INSERT INTO public.clients (id, nom, telephone, email, created_at)
+ * 5) Sauvegarde client_id + nom + telephone dans localStorage
  */
 export async function registerClientInDB(data: {
   nom: string;
   numero_whatsapp: string;
+  email?: string;
+  password?: string;
 }): Promise<Client> {
   const cleanNom = data.nom.trim();
   const cleanPhone = data.numero_whatsapp.trim().replace(/\s+/g, '');
+  const cleanEmail = data.email?.trim().toLowerCase() || '';
   const now = new Date().toISOString();
-  const fallbackId =
-    'cli-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  const fallbackId = generateUuid();
 
   let clientId = fallbackId;
   let finalNom = cleanNom;
   let finalPhone = cleanPhone;
+  let finalEmail: string | undefined = cleanEmail || undefined;
   let finalDate = now;
   let isNewClient = false;
 
   try {
     const sb = getSupabaseClient();
     if (sb) {
+      // 0. Vérifie / obtient auth.users.id via Supabase Auth
+      let authUserId: string | null = null;
+      try {
+        const { data: userRes } = await sb.auth.getUser();
+        if (userRes?.user?.id) {
+          authUserId = userRes.user.id;
+        } else if (cleanEmail) {
+          const authPassword =
+            data.password && data.password.length >= 6
+              ? data.password
+              : `EfaClient#${cleanPhone.slice(-6)}!2026`;
+          const { data: signUpRes, error: signUpErr } = await sb.auth.signUp({
+            email: cleanEmail,
+            password: authPassword,
+            options: {
+              data: { nom: cleanNom, telephone: cleanPhone, role: 'client' },
+            },
+          });
+          if (!signUpErr && signUpRes?.user?.id) {
+            authUserId = signUpRes.user.id;
+          } else {
+            const { data: signInRes } = await sb.auth.signInWithPassword({
+              email: cleanEmail,
+              password: authPassword,
+            });
+            if (signInRes?.user?.id) {
+              authUserId = signInRes.user.id;
+            }
+          }
+        } else if (typeof (sb.auth as any).signInAnonymously === 'function') {
+          const { data: anonRes } = await (sb.auth as any).signInAnonymously({
+            options: {
+              data: { nom: cleanNom, telephone: cleanPhone, role: 'client' },
+            },
+          });
+          if (anonRes?.user?.id) {
+            authUserId = anonRes.user.id;
+          }
+        }
+      } catch {
+        // Supabase Auth optionnel si désactivé : on continue avec UUID / row DB
+      }
+
       let existingClient: any = null;
 
       // 1. Cherche d'abord dans clients WHERE telephone = numero
       const { data: byTel, error: byTelErr } = await sb
         .from('clients')
-        .select('*')
+        .select('id, nom, telephone, numero, numero_whatsapp, email, date_inscription, created_at')
         .eq('telephone', cleanPhone)
         .limit(1)
         .maybeSingle();
@@ -1448,11 +1565,15 @@ export async function registerClientInDB(data: {
       if (!byTelErr && byTel) {
         existingClient = byTel;
       } else {
-        // Fallback compatibilité si anciennes lignes enregistrées sous numero / numero_whatsapp
+        // Fallback compatibilité si anciennes lignes enregistrées sous numero / numero_whatsapp / email / id
+        const orFilters = [`numero.eq.${cleanPhone}`, `numero_whatsapp.eq.${cleanPhone}`];
+        if (cleanEmail) orFilters.push(`email.eq.${cleanEmail}`);
+        if (authUserId) orFilters.push(`id.eq.${authUserId}`);
+
         const { data: byAlt } = await sb
           .from('clients')
-          .select('*')
-          .or(`numero.eq.${cleanPhone},numero_whatsapp.eq.${cleanPhone}`)
+          .select('id, nom, telephone, numero, numero_whatsapp, email, date_inscription, created_at')
+          .or(orFilters.join(','))
           .limit(1)
           .maybeSingle();
         if (byAlt) {
@@ -1461,34 +1582,55 @@ export async function registerClientInDB(data: {
       }
 
       if (existingClient) {
-        // 2. Client déjà existant -> Reconnexion sans doublon
+        // 2. Client déjà existant -> SELECT nom depuis clients & Reconnexion sans doublon
         clientId = String(existingClient.id);
-        finalNom = existingClient.nom || cleanNom;
+        finalNom =
+          (existingClient.nom && String(existingClient.nom).trim()) || cleanNom;
         finalPhone =
           existingClient.telephone ||
           existingClient.numero_whatsapp ||
           existingClient.numero ||
           cleanPhone;
+        finalEmail = existingClient.email || cleanEmail || undefined;
         finalDate =
-          existingClient.date_inscription || existingClient.created_at || now;
+          existingClient.created_at || existingClient.date_inscription || now;
+
+        // Si le nom saisi diffère d'une ancienne ligne sans nom ou si email ajouté, on met à jour
+        const patchFields: Record<string, any> = {};
+        if (!existingClient.nom && cleanNom) patchFields.nom = cleanNom;
+        if (!existingClient.telephone && cleanPhone) patchFields.telephone = cleanPhone;
+        if (!existingClient.email && cleanEmail) patchFields.email = cleanEmail;
+        if (Object.keys(patchFields).length > 0) {
+          await sb.from('clients').update(patchFields).eq('id', clientId);
+        }
       } else {
-        // 3. Nouveau client -> INSERT INTO clients (nom, telephone)
+        // 3. Nouveau client -> INSERT INTO clients (id = auth.users.id ?? uuid, nom, telephone, email, created_at)
+        const targetId = authUserId || fallbackId;
+        const insertPayload: Record<string, any> = {
+          id: targetId,
+          nom: cleanNom,
+          telephone: cleanPhone,
+          email: cleanEmail || null,
+          created_at: now,
+        };
+
         const { data: insertedRow, error: insertErr } = await sb
           .from('clients')
-          .insert([{ nom: cleanNom, telephone: cleanPhone }])
-          .select()
+          .insert([insertPayload])
+          .select('id, nom, telephone, numero, numero_whatsapp, email, date_inscription, created_at')
           .maybeSingle();
 
         if (!insertErr && insertedRow) {
           clientId = String(insertedRow.id);
-          finalNom = insertedRow.nom || cleanNom;
+          finalNom = (insertedRow.nom && String(insertedRow.nom).trim()) || cleanNom;
           finalPhone =
             insertedRow.telephone ||
             insertedRow.numero_whatsapp ||
             insertedRow.numero ||
             cleanPhone;
+          finalEmail = insertedRow.email || cleanEmail || undefined;
           finalDate =
-            insertedRow.date_inscription || insertedRow.created_at || now;
+            insertedRow.created_at || insertedRow.date_inscription || now;
           isNewClient = true;
         } else if (
           insertErr &&
@@ -1498,27 +1640,30 @@ export async function registerClientInDB(data: {
           // Concurrence / unicité -> récupère la ligne existante sans doublon
           const { data: existingAfterRace } = await sb
             .from('clients')
-            .select('*')
+            .select('id, nom, telephone, numero, numero_whatsapp, email, date_inscription, created_at')
             .eq('telephone', cleanPhone)
             .limit(1)
             .maybeSingle();
           if (existingAfterRace) {
             clientId = String(existingAfterRace.id);
-            finalNom = existingAfterRace.nom || cleanNom;
+            finalNom =
+              (existingAfterRace.nom && String(existingAfterRace.nom).trim()) ||
+              cleanNom;
             finalPhone =
               existingAfterRace.telephone ||
               existingAfterRace.numero_whatsapp ||
               existingAfterRace.numero ||
               cleanPhone;
+            finalEmail = existingAfterRace.email || cleanEmail || undefined;
             finalDate =
-              existingAfterRace.date_inscription ||
               existingAfterRace.created_at ||
+              existingAfterRace.date_inscription ||
               now;
           }
         } else if (insertErr) {
-          // Fallback schéma legacy (si id sans default ou colonne telephone absente)
+          // Fallback schéma legacy (si colonne numero_whatsapp NOT NULL ou email absent)
           const legacyPayload: Record<string, any> = {
-            id: fallbackId,
+            id: targetId,
             nom: cleanNom,
             numero: cleanPhone,
             numero_whatsapp: cleanPhone,
@@ -1529,6 +1674,9 @@ export async function registerClientInDB(data: {
           if (!insertErr.message?.toLowerCase().includes('telephone')) {
             legacyPayload.telephone = cleanPhone;
           }
+          if (!insertErr.message?.toLowerCase().includes('email') && cleanEmail) {
+            legacyPayload.email = cleanEmail;
+          }
           const { data: legacyInserted, error: legacyErr } = await sb
             .from('clients')
             .insert([legacyPayload])
@@ -1537,6 +1685,7 @@ export async function registerClientInDB(data: {
 
           if (!legacyErr && legacyInserted) {
             clientId = String(legacyInserted.id);
+            finalNom = (legacyInserted.nom && String(legacyInserted.nom).trim()) || cleanNom;
             isNewClient = true;
           } else if (legacyErr) {
             console.warn('[EFA GARDE] INSERT clients:', legacyErr.message);
@@ -1545,6 +1694,8 @@ export async function registerClientInDB(data: {
 
         if (isNewClient) {
           await registerUserInDB({
+            auth_user_id: authUserId,
+            email: finalEmail || null,
             nom: finalNom,
             role: 'client',
             telephone: finalPhone,
@@ -1562,14 +1713,19 @@ export async function registerClientInDB(data: {
     telephone: finalPhone,
     numero: finalPhone,
     numero_whatsapp: finalPhone,
+    email: finalEmail,
     date_inscription: finalDate,
+    created_at: finalDate,
   };
 
-  // 4. Sauvegarde client_id + profil dans localStorage
+  // 4. Sauvegarde client_id + nom + telephone dans localStorage
   localStorage.setItem('client_id', clientId);
   localStorage.setItem('efa_client_id', clientId);
   localStorage.setItem('efa_client_nom', finalNom);
   localStorage.setItem('efa_client_whatsapp', finalPhone);
+  if (finalEmail) {
+    localStorage.setItem('efa_client_email', finalEmail);
+  }
 
   memoryClients = memoryClients.filter(
     (c) =>
@@ -3428,6 +3584,7 @@ function startBackgroundPolling(): void {
   pollingInterval = setInterval(() => {
     fetchApprovedPharmacies().catch(() => {});
     fetchGardes().catch(() => {});
+    fetchClients().catch(() => {});
     fetchClientsCount().catch(() => {});
     fetchDemandesAbonnement().catch(() => {});
     fetchConversations().catch(() => {});
@@ -3513,6 +3670,7 @@ export function initSupabaseRealtime(): void {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'clients' },
         () => {
+          fetchClients().catch(() => {});
           fetchClientsCount().catch(() => {});
           notifyChange();
         }
@@ -3614,6 +3772,7 @@ export async function bootstrapStoreFromSupabase(
     fetchGardes(),
     fetchPendingPharmacies(),
     fetchDemandesAbonnement(),
+    fetchClients(),
     fetchClientsCount(),
     fetchConversations(),
   ]);

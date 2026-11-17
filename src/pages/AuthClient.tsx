@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { setSession } from '../lib/auth';
 import { registerClientInDB } from '../services/store';
-import { CheckCircle, MessageCircle, User } from 'lucide-react';
+import { CheckCircle, Mail, MessageCircle, User } from 'lucide-react';
 import { Logo } from '../components/Logo';
 
 interface AuthClientProps {
@@ -12,6 +12,7 @@ interface AuthClientProps {
 export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles }) => {
   const [nom, setNom] = useState(() => localStorage.getItem('efa_client_nom') || '');
   const [phone, setPhone] = useState(() => localStorage.getItem('efa_client_whatsapp') || '');
+  const [email, setEmail] = useState(() => localStorage.getItem('efa_client_email') || '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'form' | 'welcome'>('form');
@@ -20,6 +21,7 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
     e.preventDefault();
     const cleanNom = nom.trim();
     const cleanPhone = phone.trim().replace(/\s+/g, '');
+    const cleanEmail = email.trim().toLowerCase();
 
     if (cleanNom.length < 2) {
       setError('Veuillez renseigner votre nom complet.');
@@ -34,16 +36,17 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
     setLoading(true);
 
     try {
-      // 1. Recherche dans table `clients` (WHERE telephone = numero) -> reconnecte si existe, sinon INSERT (nom, telephone)
+      // 1. Recherche dans table `clients` (WHERE telephone = numero) -> SELECT nom si existe, sinon INSERT (id = auth.users.id, nom, telephone, email, created_at)
       const registered = await registerClientInDB({
         nom: cleanNom,
         numero_whatsapp: cleanPhone,
+        email: cleanEmail || undefined,
       });
 
-      // 2. Session persistante avec sauvegarde de client_id dans localStorage
+      // 2. Session persistante avec sauvegarde de client_id et nom dans localStorage
       setSession({
         role: 'client',
-        phone: registered.numero_whatsapp,
+        phone: registered.telephone || registered.numero_whatsapp,
         pharmacieNom: registered.nom,
         createdAt: new Date().toISOString(),
       });
@@ -52,7 +55,10 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
       localStorage.setItem('client_id', registered.id);
       localStorage.setItem('efa_client_id', registered.id);
       localStorage.setItem('efa_client_nom', registered.nom);
-      localStorage.setItem('efa_client_whatsapp', registered.numero_whatsapp);
+      localStorage.setItem('efa_client_whatsapp', registered.telephone || registered.numero_whatsapp);
+      if (registered.email) {
+        localStorage.setItem('efa_client_email', registered.email);
+      }
 
       setNom(registered.nom);
       setLoading(false);
@@ -66,9 +72,11 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
       const fallbackId =
         localStorage.getItem('client_id') ||
         localStorage.getItem('efa_client_id') ||
-        'cli-' + Date.now();
+        crypto.randomUUID();
       localStorage.setItem('client_id', fallbackId);
       localStorage.setItem('efa_client_id', fallbackId);
+      localStorage.setItem('efa_client_nom', cleanNom);
+      localStorage.setItem('efa_client_whatsapp', cleanPhone);
       // Fallback local persistant garanti
       setSession({
         role: 'client',
@@ -140,6 +148,25 @@ export const AuthClient: React.FC<AuthClientProps> = ({ onSuccess, onBackToRoles
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   className="w-full h-14 bg-slate-800 text-white pl-16 pr-4 rounded-xl border border-slate-700 font-mono text-base focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                />
+              </div>
+            </div>
+
+            {/* Email (optionnel, lie avec auth.users) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 block">
+                Email (optionnel) :
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-3.5 text-slate-400">
+                  <Mail className="w-5 h-5" />
+                </span>
+                <input
+                  type="email"
+                  placeholder="Ex: koffi@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full h-12 bg-slate-800 text-white pl-12 pr-4 rounded-xl border border-slate-700 text-sm focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
                 />
               </div>
             </div>

@@ -341,7 +341,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
         </div>
         <div>
           <div className="text-xs font-bold text-slate-300 tracking-wide">EFA GARDE • Lomé</div>
-          <div className="text-[10px] text-slate-500">Ordre National des Pharmaciens du Togo</div>
+          <div className="text-[10px] text-slate-500">Annuaire des Pharmacies de Garde • Togo</div>
         </div>
       </div>
     </div>

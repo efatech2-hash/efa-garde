@@ -16,6 +16,8 @@ import {
   fetchConversations,
   fetchMessages,
   getOrCreateSuperAdminConversation,
+  fetchClients,
+  getClientDisplayName,
 } from '../services/store';
 import { compressChatImage } from '../utils/imageCompressor';
 import { playNotificationSound } from '../services/sound';
@@ -234,6 +236,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
 
   useEffect(() => {
     refreshConvs();
+    fetchClients().catch(() => {});
   }, [currentPharma?.id]);
 
   // Load messages for selected conversation & mark as read
@@ -290,6 +293,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
 
     const pollInterval = setInterval(() => {
       fetchConversations(currentPharma.id).catch(() => {});
+      fetchClients().catch(() => {});
       if (selectedConv) {
         fetchMessages(selectedConv.id)
           .then((serverMsgs) => {
@@ -644,7 +648,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                         <span className="text-xs font-bold text-white truncate max-w-[160px]">
                           {isAdminConv
                             ? 'Super Admin EFA'
-                            : `Patient ${c.client_id.replace('client-', '#')}`}
+                            : getClientDisplayName(c.client_id)}
                         </span>
                       </div>
                       <span className="text-[10px] text-slate-400 shrink-0">{formattedTime}</span>
@@ -688,7 +692,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                     <h3 className="text-sm font-bold text-white truncate max-w-[60vw] sm:max-w-none">
                       {selectedConv.client_id === 'super-admin' || selectedConv.admin_id
                         ? '👑 Super Admin EFA Garde'
-                        : `Patient ${selectedConv.client_id.replace('client-', '#')}`}
+                        : getClientDisplayName(selectedConv.client_id)}
                     </h3>
                     <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1 min-w-0 flex-wrap text-xs">
                       <span className="text-[11px] text-blue-100 font-medium truncate max-w-[60vw] sm:max-w-none">
@@ -1092,7 +1096,7 @@ export const PharmaInboxPage: React.FC<PharmaInboxPageProps> = ({
                       : 'Bloquer le patient'}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Patient {selectedConv.client_id.replace('client-', '#')}
+                    {getClientDisplayName(selectedConv.client_id)}
                   </p>
                 </div>
               </div>

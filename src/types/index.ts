@@ -161,6 +161,7 @@ export interface Client {
   telephone?: string;
   numero?: string;
   numero_whatsapp: string;
+  email?: string;
   date_inscription: string;
   created_at?: string;
 }
